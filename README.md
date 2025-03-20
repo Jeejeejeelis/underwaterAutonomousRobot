@@ -13,3 +13,20 @@
 - Address magic numbers in `test_ctd`.
 - Implement depth calculations in `test_ctd`.
 - Github repo with underwater simulation. https://github.com/tervoju/argofloat 
+
+
+Cheatsheet:
+source myenv/bin/activate
+
+
+
+Current values from send_ctd!
+python3 test_ctd.py 
+cmd_string: [255, 255, 255, 255, 170, 0, 144, 0, 0, 0, 0, 0, 0, 108]
+response: b'2441514354442c31382e3837312c30312e3030372c30302e3837352a37410d0a'
+response: b'$AQCTD,18.871,01.007,00.875*7A\r\n'
+["b'$AQCTD", '18.871', '01.007', "00.875*7A\\r\\n'"]
+
+
+
+
