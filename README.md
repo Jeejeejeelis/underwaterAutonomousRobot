@@ -12,4 +12,4 @@
 ### TODO
 - Address magic numbers in `test_ctd`.
 - Implement depth calculations in `test_ctd`.
-- Githuib repo with underwater simulation. https://github.com/tervoju/argofloat 
+- Github repo with underwater simulation. https://github.com/tervoju/argofloat 
