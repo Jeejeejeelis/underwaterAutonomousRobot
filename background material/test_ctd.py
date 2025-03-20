@@ -9,7 +9,9 @@ atm_surface_pressure = 1.101325
 lattitude = 59.8443631
 
 # this is the device id connected through usb - serial convertion box
-# ser = serial.Serial("/dev/ttyUSB0", baudrate=9600, timeout=3.0)
+
+# Uncomment this!
+ser = serial.Serial("/dev/ttyUSB0", baudrate=9600, timeout=3.0)
 
 # $  A  Q  C  T  D  
 # in hex:
@@ -20,13 +22,14 @@ lattitude = 59.8443631
 ## intepredign string from CTD
 def read_ctd_values(ctd_response):
     print ("response:", ctd_response)
-    result = ctd_response.find('$AQCTD')
+    result = str(ctd_response).find('$AQCTD')
+
     conductivity = 0.0
     if result == -1:
         print("CTD start string not found")
         return -1,0,0,0
     try:
-        values = ctd_response.split(',')
+        values = str(ctd_response).split(',')
         print(values)
         temperature = float(values[1])
         pressure = float(values[2])
@@ -122,8 +125,9 @@ def test_ctd_message():
     print("depth: ", depth)
 
 def main():
-    #send_ctd([0xff,0xff,0xff,0xff,0xaa,0x00,0x90,0x00,0x00,0x00,0x00,0x00,0x00,0x6c])
-    test_ctd_message()
+    send_ctd([0xff,0xff,0xff,0xff,0xaa,0x00,0x90,0x00,0x00,0x00,0x00,0x00,0x00,0x6c])
+    #read_ctd_values(ctd_response)
+    #test_ctd_message()
 
 if __name__=="__main__":
     main()
