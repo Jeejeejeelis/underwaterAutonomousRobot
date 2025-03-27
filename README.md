@@ -29,4 +29,8 @@ response: b'$AQCTD,18.871,01.007,00.875*7A\r\n'
 
 
 
+test.. Adding git repo str8 to rPi
+
+
+
 
