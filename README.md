@@ -27,6 +27,10 @@ response: b'2441514354442c31382e3837312c30312e3030372c30302e3837352a37410d0a'
 response: b'$AQCTD,18.871,01.007,00.875*7A\r\n'
 ["b'$AQCTD", '18.871', '01.007', "00.875*7A\\r\\n'"]
 
+Git credentials stored to rpi. if not:
+git config --global credential.helper store
+after this push with key and credentials should be saved.
+
 
 
 
