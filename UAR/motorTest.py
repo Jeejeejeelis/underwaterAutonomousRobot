@@ -37,3 +37,5 @@ def main():
   time.sleep(2)
   move_down()
 
+main()
+
