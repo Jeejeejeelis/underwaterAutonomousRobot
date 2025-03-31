@@ -26,11 +26,34 @@ cmd_string: [255, 255, 255, 255, 170, 0, 144, 0, 0, 0, 0, 0, 0, 108]
 response: b'2441514354442c31382e3837312c30312e3030372c30302e3837352a37410d0a'
 response: b'$AQCTD,18.871,01.007,00.875*7A\r\n'
 ["b'$AQCTD", '18.871', '01.007', "00.875*7A\\r\\n'"]
+Git credentials stored to rpi. if not:
+git config --global credential.helper store
+after this push with key and credentials should be saved.
 
 Git credentials stored to rpi. if not:
 git config --global credential.helper store
 after this push with key and credentials should be saved.
 
+### Followed these instructions for GNSS!
+https://www.waveshare.com/wiki/SIM7600G-H_4G_HAT_(B)
+wget https://files.waveshare.com/upload/4/4e/SIM7600G-H-4G-HAT-B-Demo.zip
+sudo apt-get install p7zip-full
+7z x SIM7600G-H-4G-HAT-B-Demo.zip 
+sudo chmod 777 -R SIM7600G-H-4G-HAT-B-Demo
+cd SIM7600G-H-4G-HAT-B-Demo/Raspberry/python/PhoneCall/      
+sudo apt-get install python3-pip
+sudo pip3 install pyserial
+sudo pip3 install RPi.GPIO
+sudo python3 Phonecall.py    
+
+# then try these, which one works?
+sudo python GPS.py
+sudo python3 GPS.py
+
+# demo should print this with coordinates:
+AT+CGPS=0
+AT+CGPS=1
+AT+CGPSINFO
 
 
 
