@@ -49,7 +49,7 @@ class CTDNode(Node):
 
         if old_simulate_value != self.simulate:
             self.get_logger().info("Simulation mode changed, reconfiguring node...")
-            self.setup_mode() # This will handle cleanup and setup
+            self.setup_mode()
 
         return SetParametersResult(successful=True)
 
@@ -106,8 +106,8 @@ class CTDNode(Node):
 
     def publish_dummy_temp_cond_only(self):
         """Publishes dummy values for Temperature and Conductivity."""
-        temp_msg = Float32(data=20.0 + math.sin(time.time() * 0.1) * 2) # Some variation
-        cond_msg = Float32(data=3.5 + math.sin(time.time() * 0.2) * 0.2) # Some variation
+        temp_msg = Float32(data=20.0 + math.sin(time.time() * 0.1) * 2)
+        cond_msg = Float32(data=3.5 + math.sin(time.time() * 0.2) * 0.2)
 
         self.publisher_temp.publish(temp_msg)
         self.publisher_conductivity.publish(cond_msg)
@@ -144,10 +144,10 @@ class CTDNode(Node):
                  self.get_logger().warn(f"Incomplete response received from CTD ({len(response)}/32 bytes). Discarding.")
                  return
 
-            self.get_logger().debug(f"Raw CTD Response: {response}") # Log raw bytes for debugging
+            self.get_logger().debug(f"Raw CTD Response: {response}")
             res, temperature, pressure, conductivity = self.parse_ctd_response(response)
 
-            if res == 0: # Assuming 0 means success based on previous code
+            if res == 0:
                 self.publisher_temp.publish(Float32(data=temperature))
                 self.publisher_pressure.publish(Float32(data=pressure))
                 self.publisher_conductivity.publish(Float32(data=conductivity))
@@ -205,7 +205,6 @@ class CTDNode(Node):
         if self.ser is None or not self.ser.is_open:
             self.get_logger().warn("Cannot send command, serial port not available.")
             return
-        # (Rest of send_ctd logic...)
         try:
             if cmd_string == "DISP_ON_CMD": #check what commands ctd takes!
                  byte_cmd = bytes([0xff, 0xff, 0xff, 0xff, 0xaa, 0x00, 0x90, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x6c])
