@@ -11,7 +11,7 @@ def generate_launch_description():
 
     simulate_arg = DeclareLaunchArgument(
         'simulate',
-        default_value='False', # Set to True to run with mock data by default
+        default_value='False',
         description='Set to True to run nodes in simulation mode, False for hardware.'
     )
     simulate_param = LaunchConfiguration('simulate')
@@ -28,16 +28,15 @@ def generate_launch_description():
         with open(urdf_file_path, 'r') as file:
             robot_description_content = file.read()
     except EnvironmentError:
-        # Use print for errors during launch file parsing
         print(f"[ERROR] [launch]: Could not read URDF file: {urdf_file_path}")
-        robot_description_content = "" # Default to empty string
+        robot_description_content = ""
 
 
     robot_description_param = {'robot_description': robot_description_content}
 
     return LaunchDescription([
         simulate_arg,
-        use_sim_time_arg, # Add the new argument
+        use_sim_time_arg,
 
         Node(
             package='my_robot_package',
@@ -61,7 +60,6 @@ def generate_launch_description():
             parameters=[{'simulate': simulate_param}, {'use_sim_time': use_sim_time_param}]
         ),
 
-        # --- NEW: Nodes for RViz Visualization ---
         Node(
             package='robot_state_publisher',
             executable='robot_state_publisher',
@@ -70,7 +68,7 @@ def generate_launch_description():
         ),
         Node(
             package='my_robot_package',
-            executable='float_simulator.py', # Your new simulator script
+            executable='float_simulator.py',
             name='float_simulator_node',
             output='screen',
             parameters=[{'use_sim_time': use_sim_time_param}]
