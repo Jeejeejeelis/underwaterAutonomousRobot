@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<robot name="Float">
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <cylinder length="0.6" radius="0.2"/>
+      </geometry>
+      <material name="blue">  <color rgba="0.1 0.1 0.8 1.0"/>
+      </material>
+    </visual>
+    </link>
+</robot>

@@ -1,4 +1,16 @@
+# ROS 2 workspace generated directories
 /ros2_ws/build/
 /ros2_ws/install/
 /ros2_ws/log/
-/ros2_ws/my_robot_package/test/__pycache__/
+
+# DVL data logs generated in ros2_ws directory
+/ros2_ws/dvl_data*.csv
+
+# Python bytecode and cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Other common ignores (OS-specific, temporary files)
+*~
+.DS_Store

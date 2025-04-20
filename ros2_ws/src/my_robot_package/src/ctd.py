@@ -6,20 +6,19 @@ from rclpy.parameter import Parameter
 from rcl_interfaces.msg import SetParametersResult
 from std_msgs.msg import Float32, String
 import time
-# Import serial only if not simulating
+
 try:
     import serial
     SERIAL_AVAILABLE = True
 except ImportError:
     SERIAL_AVAILABLE = False
 import binascii
-import codecs
+# import codecs
 import math
 
 class CTDNode(Node):
     def __init__(self):
         super().__init__('ctd_node')
-
         self.declare_parameter('simulate', True) # Default to simulation
         self.simulate = self.get_parameter('simulate').get_parameter_value().bool_value
         self.add_on_set_parameters_callback(self.parameters_callback)
@@ -27,63 +26,92 @@ class CTDNode(Node):
         self.publisher_temp = self.create_publisher(Float32, 'temperature', 10)
         self.publisher_pressure = self.create_publisher(Float32, 'pressure', 10)
         self.publisher_conductivity = self.create_publisher(Float32, 'conductivity', 10)
-        self.subscription = self.create_subscription(String, 'send_ctd_command', self.send_ctd_callback, 10)
 
-        # Initialize variables
+        self.command_sub = self.create_subscription(String, 'send_ctd_command', self.send_ctd_callback, 10)
+
         self.ser = None
         self.timer = None
+        self.sim_pressure_sub = None
 
         self.setup_mode()
 
-
     def parameters_callback(self, params):
-        old_simulate = self.simulate
+        """Handle dynamic changes to the 'simulate' parameter."""
+        old_simulate_value = self.simulate
         for param in params:
             if param.name == 'simulate':
-                self.simulate = param.value
-        if old_simulate != self.simulate:
-            self.get_logger().info(f"Simulation mode changed to: {self.simulate}")
-            self.setup_mode()
+                if param.type_ == Parameter.Type.BOOL:
+                    self.simulate = param.value
+                    self.get_logger().info(f"'simulate' parameter changed to: {self.simulate}")
+                else:
+                    self.get_logger().warn(f"Incorrect type for 'simulate' parameter: {param.type_}. Expected bool.")
+                    return SetParametersResult(successful=False)
+
+        if old_simulate_value != self.simulate:
+            self.get_logger().info("Simulation mode changed, reconfiguring node...")
+            self.setup_mode() # This will handle cleanup and setup
+
         return SetParametersResult(successful=True)
 
-    def setup_mode(self):
-        """Sets up the node based on the simulation parameter."""
+    def cleanup_mode(self):
+        """Stop timers, close serial ports, destroy simulation subscribers."""
         if self.timer is not None:
             self.timer.cancel()
             self.timer = None
+            self.get_logger().debug("Timer cancelled.")
         if self.ser is not None and self.ser.is_open:
             self.ser.close()
             self.ser = None
             self.get_logger().info("Closed serial port.")
+        if self.sim_pressure_sub is not None:
+            self.destroy_subscription(self.sim_pressure_sub)
+            self.sim_pressure_sub = None
+            self.get_logger().debug("Simulated pressure subscriber destroyed.")
+
+
+    def setup_mode(self):
+        """Sets up the node based on the simulation parameter."""
+        self.cleanup_mode()
 
         if self.simulate:
-            self.get_logger().info("Running in simulation mode, publishing dummy CTD data.")
-            self.timer = self.create_timer(1.0, self.publish_dummy_data)
+            self.get_logger().info("Setting up simulation mode.")
+            self.sim_pressure_sub = self.create_subscription(
+                Float32,
+                'simulated_pressure',
+                self.simulated_pressure_callback,
+                10)
+            self.get_logger().info("Subscribed to /simulated_pressure")
+            self.timer = self.create_timer(1.0, self.publish_dummy_temp_cond_only)
+            self.get_logger().info("Started timer for dummy Temperature/Conductivity publishing.")
         else:
+            self.get_logger().info("Setting up hardware mode.")
             if not SERIAL_AVAILABLE:
                 self.get_logger().error("Pyserial not found, but simulate=False. Cannot connect to hardware.")
                 return
 
             try:
-                self.ser = serial.Serial("/dev/ttyUSB0", baudrate=9600, timeout=1.0) # Reduced timeout
+                self.ser = serial.Serial("/dev/ttyUSB0", baudrate=9600, timeout=1.0)
                 self.get_logger().info("Opened serial port /dev/ttyUSB0 successfully.")
                 self.timer = self.create_timer(1.0, self.read_ctd_values)
+                self.get_logger().info("Started timer for reading hardware CTD values.")
             except serial.SerialException as e:
                 self.get_logger().error(f"Failed to open serial port /dev/ttyUSB0: {e}")
             except Exception as e:
                  self.get_logger().error(f"An unexpected error occurred during serial setup: {e}")
 
+    def simulated_pressure_callback(self, msg):
+        """Receives pressure from simulator and publishes it."""
+        self.publisher_pressure.publish(msg)
+        # self.get_logger().debug(f"Received simulated pressure {msg.data:.2f}, publishing to /pressure")
 
-    def publish_dummy_data(self):
-        # Publish some dummy values
-        temp_msg = Float32(data=20.0 + math.sin(time.time() * 0.1)) # Add variation
-        press_msg = Float32(data=1013.25 + math.cos(time.time() * 0.1) * 10)
-        cond_msg = Float32(data=3.5 + math.sin(time.time() * 0.2) * 0.1)
+    def publish_dummy_temp_cond_only(self):
+        """Publishes dummy values for Temperature and Conductivity."""
+        temp_msg = Float32(data=20.0 + math.sin(time.time() * 0.1) * 2) # Some variation
+        cond_msg = Float32(data=3.5 + math.sin(time.time() * 0.2) * 0.2) # Some variation
+
         self.publisher_temp.publish(temp_msg)
-        self.publisher_pressure.publish(press_msg)
         self.publisher_conductivity.publish(cond_msg)
-        # self.get_logger().info(f"Published dummy CTD: T={temp_msg.data:.2f}, P={press_msg.data:.2f}, C={cond_msg.data:.2f}")
-
+        # self.get_logger().info(f"Published dummy CTD: T={temp_msg.data:.2f}, C={cond_msg.data:.2f}")
 
     def send_ctd_callback(self, msg):
         if self.simulate:
@@ -92,10 +120,10 @@ class CTDNode(Node):
         if self.ser is None or not self.ser.is_open:
              self.get_logger().warn("Serial port not available. Cannot send command.")
              return
-
         cmd_string = msg.data
         self.get_logger().info(f"Received command to send: {cmd_string}")
         self.send_ctd(cmd_string)
+
 
     def read_ctd_values(self):
         if self.ser is None or not self.ser.is_open:
@@ -109,31 +137,31 @@ class CTDNode(Node):
             response = self.ser.read(32)
 
             if not response:
-                 # If ser.read(32) times out
                  self.get_logger().warn("No response received from CTD after request (timeout).")
                  return
 
             if len(response) < 32:
                  self.get_logger().warn(f"Incomplete response received from CTD ({len(response)}/32 bytes). Discarding.")
                  return
-            self.get_logger().debug(f"Raw CTD Response: {response}")
+
+            self.get_logger().debug(f"Raw CTD Response: {response}") # Log raw bytes for debugging
             res, temperature, pressure, conductivity = self.parse_ctd_response(response)
 
-            # CHECK IF res == 0 works!!! This might be a bug when testing hardware!
-            if res == 0:
+            if res == 0: # Assuming 0 means success based on previous code
                 self.publisher_temp.publish(Float32(data=temperature))
                 self.publisher_pressure.publish(Float32(data=pressure))
                 self.publisher_conductivity.publish(Float32(data=conductivity))
                 # self.get_logger().info(f"Published CTD: T={temperature:.2f}, P={pressure:.2f}, C={conductivity:.2f}")
+            else:
+                self.get_logger().warn("Parsing CTD response indicated failure.")
 
         except serial.SerialException as e:
             self.get_logger().error(f"Serial error during CTD poll/read: {e}")
-            if self.ser and self.ser.is_open:
-                self.ser.close()
-            self.ser = None
-
+            self.cleanup_mode()
         except Exception as e:
             self.get_logger().error(f"Unexpected error during CTD poll/read: {e}")
+            self.cleanup_mode()
+
 
     def parse_ctd_response(self, ctd_response_bytes):
         try:
@@ -172,11 +200,12 @@ class CTDNode(Node):
             self.get_logger().error(f"Unexpected error during CTD parsing: {e}")
             return -1, 0.0, 0.0, 0.0
 
+
     def send_ctd(self, cmd_string):
         if self.ser is None or not self.ser.is_open:
             self.get_logger().warn("Cannot send command, serial port not available.")
             return
-
+        # (Rest of send_ctd logic...)
         try:
             if cmd_string == "DISP_ON_CMD": #check what commands ctd takes!
                  byte_cmd = bytes([0xff, 0xff, 0xff, 0xff, 0xaa, 0x00, 0x90, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x6c])
@@ -198,7 +227,6 @@ class CTDNode(Node):
         except Exception as e:
             self.get_logger().error(f"Unexpected error during CTD send: {e}")
 
-
 def main(args=None):
     rclpy.init(args=args)
     node = None
@@ -213,10 +241,9 @@ def main(args=None):
         else:
             print(f"Unhandled exception during node creation: {e}")
     finally:
+
         if node:
-            if node.ser is not None and node.ser.is_open:
-                node.ser.close()
-                node.get_logger().info("Closed serial port on shutdown.")
+            node.cleanup_mode()
             node.destroy_node()
         rclpy.shutdown()
 

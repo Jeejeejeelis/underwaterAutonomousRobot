@@ -161,7 +161,7 @@ class DVLNode(Node):
         dummy_vx = 1.0 + math.sin(time.time() * 0.2) * 0.5
         dummy_vy = 0.5 + math.cos(time.time() * 0.2) * 0.5
         dummy_vz = 0.1 + math.sin(time.time() * 0.3) * 0.1
-        dummy_altitude = 10.0 + math.cos(time.time() * 0.1) * 2.0
+        dummy_altitude = 40.0 + math.cos(time.time() * 0.1) * 2.0
         # self.get_logger().info("Publishing dummy DVL data")
         self.publisher_vx.publish(Float32(data=dummy_vx))
         self.publisher_vy.publish(Float32(data=dummy_vy))

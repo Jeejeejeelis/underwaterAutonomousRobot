@@ -12,11 +12,17 @@ install(DIRECTORY
   DESTINATION share/${PROJECT_NAME}
 )
 
+install(DIRECTORY
+  urdf
+  DESTINATION share/${PROJECT_NAME}
+)
+
 # Install python nodes correctly
 install(PROGRAMS
   src/ctd.py
   src/dvl.py
   src/gnss.py
+  src/float_simulator.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -101,3 +101,6 @@ rqt_plot /vx/data /vy/data /vz/data /altitude/data
 
 # See GNSS string with topic
 ros2 topic echo /gps_data
+
+# publish new target depth!
+ros2 topic pub /target_depth std_msgs/msg/Float32 "{data: 15.0}" --once
