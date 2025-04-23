@@ -55,7 +55,7 @@ AT+CGPS=0
 AT+CGPS=1
 AT+CGPSINFO
 
-Push with ubuntu server now!
+Push with ubuntu server now
 
 
 
