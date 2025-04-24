@@ -1,9 +1,0 @@
-/home/eelis/Desktop/underwaterAutonomousRobot/build/my_robot_package/CMakeFiles/uninstall.dir
-/home/eelis/Desktop/underwaterAutonomousRobot/build/my_robot_package/CMakeFiles/my_robot_package_uninstall.dir
-/home/eelis/Desktop/underwaterAutonomousRobot/build/my_robot_package/CMakeFiles/test.dir
-/home/eelis/Desktop/underwaterAutonomousRobot/build/my_robot_package/CMakeFiles/edit_cache.dir
-/home/eelis/Desktop/underwaterAutonomousRobot/build/my_robot_package/CMakeFiles/rebuild_cache.dir
-/home/eelis/Desktop/underwaterAutonomousRobot/build/my_robot_package/CMakeFiles/list_install_components.dir
-/home/eelis/Desktop/underwaterAutonomousRobot/build/my_robot_package/CMakeFiles/install.dir
-/home/eelis/Desktop/underwaterAutonomousRobot/build/my_robot_package/CMakeFiles/install/local.dir
-/home/eelis/Desktop/underwaterAutonomousRobot/build/my_robot_package/CMakeFiles/install/strip.dir

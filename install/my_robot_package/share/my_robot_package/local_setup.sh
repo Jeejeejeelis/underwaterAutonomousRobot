@@ -1,1 +1,0 @@
-/home/eelis/Desktop/underwaterAutonomousRobot/build/my_robot_package/ament_cmake_environment_hooks/local_setup.sh

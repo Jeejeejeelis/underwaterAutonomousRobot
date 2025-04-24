@@ -1,1 +1,0 @@
-/home/eelis/Desktop/underwaterAutonomousRobot/ros2_ws/src/my_robot_package/src/ctd.py
