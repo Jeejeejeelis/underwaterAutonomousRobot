@@ -104,3 +104,24 @@ ros2 topic echo /gps_data
 
 # publish new target depth!
 ros2 topic pub /target_depth std_msgs/msg/Float32 "{data: 15.0}" --once
+
+
+
+# make laptop the ros2 slave to run rqt etc on it instead of rpi!
+# write correct ips to RPI_IP and LAPTOP_IP!
+nano ~/.bashrc
+
+export ROS_MASTER_URI=http://<RPI_IP>:11311
+export ROS_HOSTNAME=<LAPTOP_IP>
+export ROS_IP=<LAPTOP_IP>
+
+source ~/.bashrc
+
+# make rpi master!
+nano ~/.bashrc
+
+export ROS_MASTER_URI=http://<RPI_IP>:11311
+export ROS_HOSTNAME=<RPI_IP>
+export ROS_IP=<RPI_IP>
+
+source ~/.bashrc
