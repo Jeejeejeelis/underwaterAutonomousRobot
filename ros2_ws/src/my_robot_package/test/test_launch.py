@@ -12,25 +12,24 @@ import launch_testing.actions
 import launch_testing
 
 def generate_test_description():
-    # Launch each node with simulation enabled.
     ctd_node = launch_ros.actions.Node(
         package='my_robot_package',
         executable='ctd.py',
-        name='ctd_node',        # Corrected name
+        name='ctd_node',
         output='screen',
         parameters=[{'simulate': True}]
     )
     dvl_node = launch_ros.actions.Node(
         package='my_robot_package',
         executable='dvl.py',
-        name='dvl_node',        # Corrected name
+        name='dvl_node',
         output='screen',
         parameters=[{'simulate': True}]
     )
     gnss_node = launch_ros.actions.Node(
         package='my_robot_package',
         executable='gnss.py',
-        name='gnss_node',       # Corrected name
+        name='gnss_node',
         output='screen',
         parameters=[{'simulate': True}]
     )
@@ -46,16 +45,15 @@ def generate_test_description():
         'gnss_node': gnss_node
     }
 
-# Dummy subscriber for CTD node (listens to 'temperature')
 class DummyCTDSubscriber(Node):
     def __init__(self):
         super().__init__('dummy_ctd_subscriber')
         self.subscription = self.create_subscription(
             Float32,
-            'temperature', # Topic name from ctd.py
+            'temperature',
             self.listener_callback,
             10)
-        self.received_data = [] # Store multiple messages
+        self.received_data = []
         self.get_logger().info("Dummy CTD subscriber started.")
 
 
@@ -63,40 +61,36 @@ class DummyCTDSubscriber(Node):
         self.received_data.append(msg.data)
         self.get_logger().info(f"CTD - Received temperature: {msg.data}")
 
-# Dummy subscriber for DVL node (listens to 'vx')
 class DummyDVLSubscriber(Node):
     def __init__(self):
         super().__init__('dummy_dvl_subscriber')
         self.subscription = self.create_subscription(
             Float32,
-            'vx',             # Topic name from dvl.py
+            'vx',
             self.listener_callback,
             10)
-        self.received_data = [] # Store multiple messages
+        self.received_data = []
         self.get_logger().info("Dummy DVL subscriber started.")
 
     def listener_callback(self, msg):
         self.received_data.append(msg.data)
         self.get_logger().info(f"DVL - Received vx: {msg.data}")
 
-# Dummy subscriber for GNSS node (listens to 'gps_data')
 class DummyGNSSSubscriber(Node):
     def __init__(self):
         super().__init__('dummy_gnss_subscriber')
         self.subscription = self.create_subscription(
             String,
-            'gps_data',       # Topic name from gnss.py
+            'gps_data',
             self.listener_callback,
             10)
-        self.received_data = [] # Store multiple messages
+        self.received_data = []
         self.get_logger().info("Dummy GNSS subscriber started.")
 
     def listener_callback(self, msg):
         self.received_data.append(msg.data)
         self.get_logger().info(f"GNSS - Received gps_data: {msg.data}")
 
-# --- Test Classes ---
-# Use a single context for initializing rclpy once for all tests
 @launch_testing.post_shutdown_test()
 class TestAllNodesSimulated(unittest.TestCase):
 
@@ -104,15 +98,13 @@ class TestAllNodesSimulated(unittest.TestCase):
         rclpy.init()
         try:
             node = DummyCTDSubscriber()
-            # Spin for a few seconds to allow messages to arrive
             end_time = time.time() + 5.0
             while time.time() < end_time:
                  rclpy.spin_once(node, timeout_sec=0.1)
                  if len(node.received_data) > 0:
-                     break # Exit loop once data is received
+                     break
 
             self.assertGreater(len(node.received_data), 0, "No dummy temperature data received from CTD node.")
-            # Check if received data is float (basic check)
             self.assertIsInstance(node.received_data[0], float)
         finally:
             node.destroy_node()
@@ -140,15 +132,17 @@ class TestAllNodesSimulated(unittest.TestCase):
             node = DummyGNSSSubscriber()
             end_time = time.time() + 5.0
             while time.time() < end_time:
-                 rclpy.spin_once(node, timeout_sec=0.1)
-                 if len(node.received_data) > 0:
-                     break
-
+                rclpy.spin_once(node, timeout_sec=0.1)
+                if len(node.received_data) > 0:
+                    break
             self.assertGreater(len(node.received_data), 0, "No dummy gps_data received from GNSS node.")
             self.assertIsInstance(node.received_data[0], str)
-            # Check if the string contains expected parts
-            self.assertIn("Lat:", node.received_data[0])
-            self.assertIn("Lon:", node.received_data[0])
+            self.assertTrue(node.received_data[0].startswith('$GPGGA,'), "GNSS dummy data doesn't start with $GPGGA,")
+            parts = node.received_data[0].split(',')
+            self.assertGreater(len(parts), 6, "Dummy GPGGA string seems too short.")
+            self.assertIn(parts[6], ['1', '2'], "Dummy GPGGA fix quality is not 1 or 2.")
         finally:
-            node.destroy_node()
-            rclpy.shutdown()
+            if node and rclpy.ok():
+                node.destroy_node()
+            if rclpy.ok():
+                rclpy.shutdown()
