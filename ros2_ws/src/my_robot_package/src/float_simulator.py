@@ -8,8 +8,7 @@ import tf2_ros
 import math
 import time
 
-DBAR_TO_METERS = 0.992
-METERS_TO_DBAR = 1.0 / DBAR_TO_METERS
+METERS_TO_DBAR = 1.0 / 0.992 # From original: DBAR_TO_METERS = 0.992
 
 def get_quaternion_from_euler(roll, pitch, yaw):
     qx = math.sin(roll/2) * math.cos(pitch/2) * math.cos(yaw/2) - math.cos(roll/2) * math.sin(pitch/2) * math.sin(yaw/2)
@@ -21,26 +20,29 @@ def get_quaternion_from_euler(roll, pitch, yaw):
 class FloatSimulatorNode(Node):
     def __init__(self):
         super().__init__('float_simulator_node')
-        self.get_logger().info(f"Float Simulator starting at {time.strftime('%H:%M:%S')}")
+        self.get_logger().info(f"Float Simulator (Source of Raw Sim Data) starting at {time.strftime('%H:%M:%S')}")
 
         self.declare_parameter('publish_rate', 10.0) # Hz
         self.declare_parameter('max_vertical_speed', 0.1) # Max ascent/descent speed (m/s)
         self.declare_parameter('depth_kp', 0.5) # Proportional gain for depth control
+        self.declare_parameter('sim_target_vx', 0.1) # m/s, for simple horizontal motion
+        self.declare_parameter('sim_target_vy', 0.05) # m/s, for simple horizontal motion
+        self.declare_parameter('sim_seafloor_depth_m', 100.0) # meters
 
         self.x = 0.0
         self.y = 0.0
-        self.current_depth = 0.0
-        self.target_depth = 0.0
+        self.current_depth_m = 0.0
+        self.target_depth_m = 0.0 # This will be controlled by a subscription
         self.target_depth_received = False
 
-        self.roll = 0.0
-        self.pitch = 0.0
-        self.yaw = 0.0
-        self.current_vx = 0.0
-        self.current_vy = 0.0
-        self.current_vz = 0.0
-        # self.current_pressure_dbar = None
-        self.current_altitude = None
+        self.vx_mps = self.get_parameter('sim_target_vx').value # Simulated X velocity
+        self.vy_mps = self.get_parameter('sim_target_vy').value # Simulated Y velocity
+        self.vz_mps = 0.0 # Vertical velocity, controlled by depth PID
+        self.altitude_agl_m = self.get_parameter('sim_seafloor_depth_m').value # Altitude Above Ground Level
+
+        self.roll_rad = 0.0
+        self.pitch_rad = 0.0
+        self.yaw_rad = 0.0
 
         self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
         self.world_frame = 'odom'
@@ -48,110 +50,99 @@ class FloatSimulatorNode(Node):
 
         self.last_time = self.get_clock().now()
 
-        self.vx_sub = self.create_subscription(Float32, 'vx', self.vx_callback, 10)
-        self.vy_sub = self.create_subscription(Float32, 'vy', self.vy_callback, 10)
-        # self.vz_sub = self.create_subscription(Float32, 'vz', self.vz_callback, 10)
-        self.alt_sub = self.create_subscription(Float32, 'altitude', self.altitude_callback, 10)
-        self.pressure_sub = self.create_subscription(Float32, 'pressure', self.pressure_callback, 10)
+        # Subscription to control the float's target depth
         self.target_depth_sub = self.create_subscription(Float32, 'target_depth', self.target_depth_callback, 10)
 
-        self.depth_pub = self.create_publisher(Float32, 'calculated_depth', 10) # Renaming might be good later
-        self.seafloor_depth_pub = self.create_publisher(Float32, 'seafloor_depth_below_surface', 10)
-        self.float_z_pub = self.create_publisher(Float32, 'float_z_position', 10)
-        self.seafloor_z_pub = self.create_publisher(Float32, 'seafloor_z_position', 10)
-        self.sim_pressure_pub = self.create_publisher(Float32, 'simulated_pressure', 10)
+        # Publishers for simulated raw sensor data
+        self.sim_pressure_pub = self.create_publisher(Float32, 'sim_pressure_raw', 10) # dbar
+        self.sim_dvl_vx_pub = self.create_publisher(Float32, 'sim_dvl_raw_vx', 10)       # m/s
+        self.sim_dvl_vy_pub = self.create_publisher(Float32, 'sim_dvl_raw_vy', 10)       # m/s
+        self.sim_dvl_vz_pub = self.create_publisher(Float32, 'sim_dvl_raw_vz', 10)       # m/s
+        self.sim_dvl_alt_pub = self.create_publisher(Float32, 'sim_dvl_raw_altitude', 10) # m
+
+        # Publishers for ground truth from simulator
+        self.ground_truth_depth_pub = self.create_publisher(Float32, 'sim_ground_truth_depth', 10)
+        self.ground_truth_altitude_pub = self.create_publisher(Float32, 'sim_ground_truth_altitude', 10)
+        self.ground_truth_seafloor_z_pub = self.create_publisher(Float32, 'sim_ground_truth_seafloor_z', 10)
+
 
         publish_period = 1.0 / self.get_parameter('publish_rate').value
-        self.timer = self.create_timer(publish_period, self.update_pose_and_publish)
-        self.get_logger().info(f"Simulator initialized. Waiting for target depth command on /target_depth.")
-
-    def vx_callback(self, msg):
-        self.current_vx = msg.data
-
-    def vy_callback(self, msg):
-        self.current_vy = msg.data
-
-    def altitude_callback(self, msg):
-        self.current_altitude = msg.data
-
-    def pressure_callback(self, msg):
-        # self.get_logger().debug(f"Received pressure {msg.data:.2f} | Internal depth {self.current_depth:.2f}")
-        pass
+        self.timer = self.create_timer(publish_period, self.update_state_and_publish)
+        self.get_logger().info("Simulator initialized. Waiting for target depth command on /target_depth.")
 
     def target_depth_callback(self, msg):
         if msg.data >= 0:
-             self.target_depth = msg.data
+             self.target_depth_m = msg.data
              if not self.target_depth_received:
-                 self.get_logger().info(f"Received initial target depth command: {self.target_depth:.2f} m")
+                 self.get_logger().info(f"Received initial target depth command: {self.target_depth_m:.2f} m")
                  self.target_depth_received = True
              else:
-                 self.get_logger().info(f"Received new target depth command: {self.target_depth:.2f} m")
+                 self.get_logger().info(f"Received new target depth command: {self.target_depth_m:.2f} m")
         else:
             self.get_logger().warn(f"Received invalid target depth {msg.data:.2f} m. Target depth must be non-negative.")
 
-    def update_pose_and_publish(self):
+    def update_state_and_publish(self):
         now = self.get_clock().now()
         dt = (now - self.last_time).nanoseconds / 1e9
-        if dt <= 0: # Avoid issues if time jumps backwards or dt is zero
+        if dt <= 0:
             return
         self.last_time = now
 
-        if self.target_depth_received: # Only control if a target has been set
-            depth_error = self.target_depth - self.current_depth
+        # Simple depth controller
+        if self.target_depth_received:
+            depth_error = self.target_depth_m - self.current_depth_m
             kp = self.get_parameter('depth_kp').value
             max_vz = self.get_parameter('max_vertical_speed').value
-
-            vz_command = kp * depth_error
-
-            self.current_vz = max(-max_vz, min(max_vz, vz_command))
-
-            self.current_depth += self.current_vz * dt
-
-            if self.current_depth < 0:
-                self.current_depth = 0
-                self.current_vz = 0
+            self.vz_mps = max(-max_vz, min(max_vz, kp * depth_error))
         else:
-            self.current_vz = 0.0
+            self.vz_mps = 0.0
 
-        self.x += self.current_vx * dt
-        self.y += self.current_vy * dt
+        # Update position
+        self.current_depth_m += self.vz_mps * dt
+        if self.current_depth_m < 0: # Cannot go above surface
+            self.current_depth_m = 0
+            if self.vz_mps < 0: self.vz_mps = 0 # Stop ascending if at surface
 
+        self.x += self.vx_mps * dt
+        self.y += self.vy_mps * dt
+
+        # Update simulated altitude
+        seafloor_depth_m = self.get_parameter('sim_seafloor_depth_m').value
+        self.altitude_agl_m = seafloor_depth_m - self.current_depth_m
+        if self.altitude_agl_m < 0: # Cannot go below seafloor
+            self.altitude_agl_m = 0
+            self.current_depth_m = seafloor_depth_m # Correct depth if "passed through" seafloor
+            if self.vz_mps > 0: self.vz_mps = 0 # Stop descending if at seafloor
+
+        # Publish ground truth TF
         t = TransformStamped()
         t.header.stamp = now.to_msg()
         t.header.frame_id = self.world_frame
         t.child_frame_id = self.robot_frame
         t.transform.translation.x = self.x
         t.transform.translation.y = self.y
-        t.transform.translation.z = -self.current_depth # Use internal depth state
-        qx, qy, qz, qw = get_quaternion_from_euler(self.roll, self.pitch, self.yaw)
+        t.transform.translation.z = -self.current_depth_m
+        qx, qy, qz, qw = get_quaternion_from_euler(self.roll_rad, self.pitch_rad, self.yaw_rad)
         t.transform.rotation.x = qx
         t.transform.rotation.y = qy
         t.transform.rotation.z = qz
         t.transform.rotation.w = qw
         self.tf_broadcaster.sendTransform(t)
 
-        depth_msg = Float32()
-        depth_msg.data = self.current_depth
-        self.depth_pub.publish(depth_msg) # Topic now reflects internal state
+        # Publish simulated raw sensor data
+        self.sim_pressure_pub.publish(Float32(data=self.current_depth_m * METERS_TO_DBAR))
+        self.sim_dvl_vx_pub.publish(Float32(data=self.vx_mps))
+        self.sim_dvl_vy_pub.publish(Float32(data=self.vy_mps))
+        self.sim_dvl_vz_pub.publish(Float32(data=self.vz_mps)) # DVL measures velocity of the float
+        self.sim_dvl_alt_pub.publish(Float32(data=self.altitude_agl_m))
 
-        float_z_msg = Float32()
-        float_z_msg.data = -self.current_depth
-        self.float_z_pub.publish(float_z_msg)
+        # Publish ground truth values
+        self.ground_truth_depth_pub.publish(Float32(data=self.current_depth_m))
+        self.ground_truth_altitude_pub.publish(Float32(data=self.altitude_agl_m))
+        self.ground_truth_seafloor_z_pub.publish(Float32(data=-seafloor_depth_m))
 
-        sim_pressure_msg = Float32()
-        sim_pressure_msg.data = self.current_depth * METERS_TO_DBAR # Convert depth back to pressure
-        self.sim_pressure_pub.publish(sim_pressure_msg)
 
-        if self.current_altitude is not None:
-            seafloor_depth_below_surface = self.current_depth + self.current_altitude
-            seafloor_depth_msg = Float32()
-            seafloor_depth_msg.data = seafloor_depth_below_surface
-            self.seafloor_depth_pub.publish(seafloor_depth_msg)
-            seafloor_z_msg = Float32()
-            seafloor_z_msg.data = -seafloor_depth_below_surface
-            self.seafloor_z_pub.publish(seafloor_z_msg)
-
-        # self.get_logger().debug(f"Tgt:{self.target_depth:.1f} Depth:{self.current_depth:.2f} Vz:{self.current_vz:.3f} SimPrs:{sim_pressure_msg.data:.2f}")
+        self.get_logger().debug(f"Sim State: D={self.current_depth_m:.2f}m, Alt={self.altitude_agl_m:.2f}m, Vz={self.vz_mps:.3f}m/s, P_sim={self.current_depth_m * METERS_TO_DBAR:.2f}dbar")
 
 def main(args=None):
     rclpy.init(args=args)

@@ -23,6 +23,7 @@ install(PROGRAMS
   src/dvl.py
   src/gnss.py
   src/float_simulator.py
+  src/depth_calculator.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
