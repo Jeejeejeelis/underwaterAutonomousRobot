@@ -80,6 +80,13 @@ def generate_launch_description():
             output='screen',
             parameters=[{'use_sim_time': use_sim_time_param}]
         ),
+        Node(
+            package='my_robot_package',
+            executable='mission_control_node.py',
+            name='mission_control_node',
+            output='screen',
+            parameters=[{'use_sim_time': use_sim_time_param}]
+        ),
         # Node(
         #     package='rviz2',
         #     executable='rviz2',

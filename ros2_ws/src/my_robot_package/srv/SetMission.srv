@@ -1,8 +1,8 @@
 # File: ros2_ws/src/my_robot_package/srv/SetMission.srv
 
-# --- Request ---
+# --- Request Fields ---
 # Mission mode selection
-string mission_mode                 # "IDLE", "LAYER_SCAN", "TARGET_DEPTH_HOLD"
+string mission_mode                     # "IDLE", "LAYER_SCAN", "TARGET_DEPTH_HOLD"
 string MISSION_IDLE = "IDLE"
 string MISSION_LAYER_SCAN = "LAYER_SCAN"
 string MISSION_TARGET_DEPTH_HOLD = "TARGET_DEPTH_HOLD"
@@ -11,12 +11,14 @@ string MISSION_TARGET_DEPTH_HOLD = "TARGET_DEPTH_HOLD"
 float32 scan_bottom_target_altitude_m # Target altitude above ground level (AGL) for the "bottom" part of scan (e.g., 2.0 meters)
 float32 scan_surface_target_depth_m   # Depth to consider "surface" (e.g., 0.5m, must be positive)
 float32 scan_surface_wait_time_sec  # Time to wait at surface (seconds)
-int32   scan_cycles                 # Number of up/down cycles (0 for indefinite, >0 for specific count)
+int32   scan_cycles                   # Number of up/down cycles (0 for indefinite, >0 for specific count)
 
 # Parameters for TARGET_DEPTH_HOLD
-float32 hold_target_depth_m         # Target depth for holding (positive value)
-float32 hold_duration_sec           # Duration to hold at the target depth (seconds)
+float32 hold_target_depth_m           # Target depth for holding (positive value)
+float32 hold_duration_sec             # Duration to hold at the target depth (seconds)
 
-# --- Response ---
-bool success                        # True if the mission mode was accepted and started
-string message                      # Status message (e.g., "Mission started", "Invalid mode")
+---
+
+# --- Response Fields ---
+bool success                          # True if the mission mode was accepted and started
+string message                        # Status message (e.g., "Mission started", "Invalid mode")

@@ -22,8 +22,8 @@ class FloatSimulatorNode(Node):
         super().__init__('float_simulator_node')
         self.get_logger().info(f"Float Simulator (Source of Raw Sim Data) starting at {time.strftime('%H:%M:%S')}")
 
-        self.declare_parameter('publish_rate', 10.0) # Hz
-        self.declare_parameter('max_vertical_speed', 0.1) # Max ascent/descent speed (m/s)
+        self.declare_parameter('publish_rate', 10.0)
+        self.declare_parameter('max_vertical_speed', 0.5) # Max ascent/descent speed (m/s)
         self.declare_parameter('depth_kp', 0.5) # Proportional gain for depth control
         self.declare_parameter('sim_target_vx', 0.1) # m/s, for simple horizontal motion
         self.declare_parameter('sim_target_vy', 0.05) # m/s, for simple horizontal motion
