@@ -112,16 +112,11 @@ class DVLNode(Node):
             self.publisher_vz.publish(Float32(data=self.sim_vz))
             self.publisher_altitude.publish(Float32(data=self.sim_altitude))
             self.get_logger().debug(f"Published Sim DVL: Vx={self.sim_vx:.3f}, Vy={self.sim_vy:.3f}, Vz={self.sim_vz:.3f}, Alt={self.sim_altitude:.2f}")
-            # Reset them so we wait for a new full set - ensures somewhat synchronized publishing
-            # self.sim_vx = None; self.sim_vy = None; self.sim_vz = None; self.sim_altitude = None
-            # Or, just publish the latest available if some are stale - current approach is simpler if simulator publishes all rapidly.
 
     def publish_averaged_hardware_data(self):
         if self.simulate: return # This timer is only for hardware
 
         now = self.get_clock().now()
-        # Check if publish_interval has passed (or use self.last_publish_time for more precise interval)
-        # This is now controlled by its own timer (timer_hw_publish)
         if self.measurement_count > 0:
             avg_vx = self.sum_vx / self.measurement_count
             avg_vy = self.sum_vy / self.measurement_count
@@ -136,24 +131,21 @@ class DVLNode(Node):
 
             self.sum_vx = 0.0; self.sum_vy = 0.0; self.sum_vz = 0.0
             self.sum_altitude = 0.0; self.measurement_count = 0
-        # else:
-        #     self.get_logger().debug("No new DVL hardware measurements to average and publish.")
-        self.last_publish_time = now # Reset window start time
+
+        self.last_publish_time = now
 
     def read_and_accumulate_hardware_dvl(self):
         if self.simulate: return # Only for hardware
         if not self.sock:
-            # Try to reconnect if socket is lost
             self.get_logger().warn("No DVL connection, attempting to reconnect in read_and_accumulate...")
             self.connect()
             if not self.sock: self.get_logger().warn("DVL reconnect failed."); return
 
-        try: # Socket reading and JSON processing
-            # ... (same as original read_and_process_hardware_dvl but only accumulates)
+        try:
             data = self.sock.recv(4096)
-            if len(data) == 0: self.disconnect(); return # Reconnect will be tried by timer
+            if len(data) == 0: self.disconnect(); return
             self.read_buffer += data
-        except socket.timeout: return # Normal
+        except socket.timeout: return
         except socket.error as e: self.get_logger().error(f'DVL Socket error: {e}.'); self.disconnect(); return
         except Exception as e: self.get_logger().error(f'Unexpected DVL read error: {e}'); self.disconnect(); return
 
@@ -163,7 +155,7 @@ class DVLNode(Node):
             if not line_str: continue
             try:
                 jsondata = json.loads(line_str)
-                if self.csv_writer: # Logging raw data
+                if self.csv_writer:
                     jsondata['timestamp_ros'] = self.get_clock().now().nanoseconds / 1e9
                     self.csv_writer.writerow(jsondata)
                 if jsondata.get("velocity_valid", False):
@@ -176,12 +168,8 @@ class DVLNode(Node):
             except json.JSONDecodeError: self.get_logger().warn(f"JSON DVL decode error: {line_str[:100]}...")
             except Exception as e: self.get_logger().error(f"DVL JSON processing error: {e}")
 
-    # --- setup_csv_writer, connect, disconnect, send_dvl_callback, send_hardware_dvl_command, destroy_node ---
-    # These methods remain largely the same as in the previous correctly functioning DVL version.
-    # Ensure send_hardware_dvl_command exists and works.
-    # For brevity, I'll skip pasting them again.
 
-    def setup_csv_writer(self): # Copied from previous correct version
+    def setup_csv_writer(self):
         if self.csv_file: self.csv_file.close(); self.csv_file = None; self.csv_writer = None
         if self.save_locally and not self.simulate:
             try:
@@ -193,7 +181,7 @@ class DVLNode(Node):
                 self.csv_writer.writeheader(); self.get_logger().info(f"Opened DVL data file: {filename}")
             except Exception as e: self.get_logger().error(f"Fail to open DVL CSV '{filename}': {e}"); self.csv_file=None; self.csv_writer=None
 
-    def connect(self): # Copied from previous correct version
+    def connect(self):
         if self.sock: self.disconnect()
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -203,18 +191,18 @@ class DVLNode(Node):
         except socket.timeout: self.get_logger().error(f'DVL Conn Timeout {self.tcp_ip}:{self.tcp_port}'); self.sock = None
         except Exception as e: self.get_logger().error(f'DVL Conn Fail {self.tcp_ip}:{self.tcp_port}: {e}'); self.sock = None
 
-    def disconnect(self): # Copied from previous correct version
+    def disconnect(self):
         if self.sock:
             try: self.sock.close(); self.get_logger().info("DVL socket closed.")
             except Exception as e: self.get_logger().warn(f"Error closing DVL socket: {e}")
             finally: self.sock = None
 
-    def send_dvl_callback(self, msg): # Copied from previous correct version
+    def send_dvl_callback(self, msg):
          if self.simulate: self.get_logger().info("DVL sim mode, ignoring send_dvl_command."); return
          if not self.sock: self.get_logger().warn("DVL socket not connected for command."); return
          self.send_hardware_dvl_command(msg.data)
 
-    def send_hardware_dvl_command(self, cmd_string): # Copied from previous correct version
+    def send_hardware_dvl_command(self, cmd_string):
         if not self.sock: self.get_logger().warn("No DVL socket for command."); return
         try:
             self.get_logger().info(f"Sending to DVL: {cmd_string}")
@@ -227,7 +215,6 @@ class DVLNode(Node):
         self.cleanup_resources()
         super().destroy_node()
 
-# main function remains the same
 def main(args=None):
     rclpy.init(args=args)
     node = None

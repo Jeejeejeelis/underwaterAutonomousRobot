@@ -39,7 +39,7 @@ class CTDNode(Node):
         self.command_sub = self.create_subscription(String, 'send_ctd_command', self.send_ctd_callback, 10)
 
         self.ser = None
-        self.timer_hardware_poll = None # Renamed timer
+        self.timer_hardware_poll = None
         self.sim_pressure_sub = None
 
         self.setup_mode()
@@ -98,8 +98,6 @@ class CTDNode(Node):
         self.publisher_temp.publish(Float32(data=temp_val))
         self.publisher_conductivity.publish(Float32(data=cond_val))
         self.get_logger().debug(f"Published Sim CTD on update: P={gauge_pressure_dbar:.2f}dbar (gauge), T={temp_val:.2f}C, C={cond_val:.2f}mS/cm")
-
-    # --- send_ctd_callback, read_hardware_ctd_values, parse_ctd_response_hardware, send_ctd_hardware_command, destroy_node ---
 
     def send_ctd_callback(self, msg):
         if self.simulate:

@@ -18,7 +18,7 @@ class GPSNode(Node):
         super().__init__('gnss_node')
 
         self.declare_parameter('simulate', True)
-        self.declare_parameter('serial_port_gnss', "/dev/ttyUSB2") # Specific port for GNSS
+        self.declare_parameter('serial_port_gnss', "/dev/ttyUSB2")
         self.declare_parameter('baud_rate_gnss', 115200)
         self.declare_parameter('timer_period_gnss', 2.0) # How often to request/publish GPS data
 
@@ -29,14 +29,14 @@ class GPSNode(Node):
 
         self.add_on_set_parameters_callback(self.parameters_callback)
 
-        self.publisher = self.create_publisher(String, 'gps_data', 10) # Publishes raw NMEA or +CGPSINFO like string
+        self.publisher = self.create_publisher(String, 'gps_data', 10)
 
         self.ser = None
         self.timer = None
 
-        self.gps_initialized_hardware = False # For hardware init sequence
+        self.gps_initialized_hardware = False
         self.last_cmd_time = time.time()
-        self.init_step = 0 # 0: start, 1: turn off, 2: turn on, 3: ready (for hardware)
+        self.init_step = 0 # 0: start, 1: turn off, 2: turn on, 3: ready
 
         self.setup_mode()
 
@@ -63,7 +63,7 @@ class GPSNode(Node):
     def cleanup_resources(self):
         if self.timer: self.timer.cancel(); self.timer = None
         if self.ser and self.ser.is_open:
-            if not self.simulate: # Try to turn off GPS if it was on for hardware
+            if not self.simulate:
                 try:
                     self.get_logger().info("Attempting to turn off GPS module (AT+CGPS=0) before closing port.")
                     self.send_at_command_hardware('AT+CGPS=0', 'OK', 1.0)
@@ -95,18 +95,11 @@ class GPSNode(Node):
 
 
     def publish_simulated_gnss_data(self):
-        # Simulate a GPGGA NMEA string or a raw +CGPSINFO string
-        # Using the +CGPSINFO format from the original gnss.py for consistency
-        # Format: latitude,N/S,longitude,E/W,date,time,altitude,speed,course
-        # Example: 6011.5234,N,02456.7498,E,160425,123519.00,545.4,0.0,,
-        # Let's make it slightly dynamic
         lat_deg = 60 + (time.time() % 1000) / 10000.0
         lon_deg = 24 + (time.time() % 1000) / 10000.0
-        lat_nmea = f"{int(lat_deg*100):04d}.{int((lat_deg*100 - int(lat_deg*100))*10000):04d}" # DDMM.MMMM
-        lon_nmea = f"{int(lon_deg*100):05d}.{int((lon_deg*100 - int(lon_deg*100))*10000):04d}" # DDDMM.MMMM
+        lat_nmea = f"{int(lat_deg*100):04d}.{int((lat_deg*100 - int(lat_deg*100))*10000):04d}"
+        lon_nmea = f"{int(lon_deg*100):05d}.{int((lon_deg*100 - int(lon_deg*100))*10000):04d}"
 
-        # Create a more complete +CGPSINFO like string, or a GPGGA.
-        # For simplicity, using the original dummy string structure.
         sim_data = f"{lat_nmea},N,{lon_nmea},E,{time.strftime('%d%m%y,%H%M%S.00', time.gmtime())},50.0,0.0,"
         self.get_logger().debug(f"Publishing Simulated GNSS (+CGPSINFO like): {sim_data}")
         self.publisher.publish(String(data=sim_data))
@@ -124,10 +117,9 @@ class GPSNode(Node):
             while (time.monotonic() - start_time) < timeout_sec:
                 if self.ser.in_waiting > 0:
                     rec_buff_bytes += self.ser.read(self.ser.in_waiting)
-                    # Early exit if expected response or ERROR is found
                     if expected_response.encode('ascii') in rec_buff_bytes or b"ERROR" in rec_buff_bytes:
                         break
-                time.sleep(0.05) # Small delay to allow data to arrive
+                time.sleep(0.05)
 
             rec_buff_decoded = rec_buff_bytes.decode('ascii', errors='ignore').strip()
             self.get_logger().debug(f"GNSS Response to '{command}': {rec_buff_decoded}")
@@ -139,7 +131,7 @@ class GPSNode(Node):
                 return False, rec_buff_decoded
         except serial.SerialException as e:
             self.get_logger().error(f"GNSS serial error during AT command '{command}': {e}")
-            self.cleanup_resources() # Try to reset
+            self.cleanup_resources()
             return False, ""
         except Exception as e:
              self.get_logger().error(f"Unexpected error during GNSS AT command '{command}': {e}")
@@ -148,46 +140,45 @@ class GPSNode(Node):
     def request_hardware_gps_position(self):
         if self.ser is None or not self.ser.is_open:
             self.get_logger().warn("GNSS serial port not available. Trying to reopen...")
-            self.setup_mode() # Attempt to re-establish
+            self.setup_mode()
             return
 
         now = time.time()
-        if now - self.last_cmd_time < 1.5: # Basic command pacing
+        if now - self.last_cmd_time < 1.5:
              return
 
         success = False
         response_data = ""
 
-        if self.init_step == 0: # Start initialization
+        if self.init_step == 0:
              self.get_logger().info('Starting GNSS hardware initialization...')
              self.init_step = 1
 
-        elif self.init_step == 1: # Turn off GPS (ensure clean state)
+        elif self.init_step == 1:
              success, _ = self.send_at_command_hardware('AT+CGPS=0', 'OK', 2.0)
              if success: self.init_step = 2
-             else: self.init_step = 0 # Retry init
+             else: self.init_step = 0
 
-        elif self.init_step == 2: # Turn on GPS
+        elif self.init_step == 2:
             success, _ = self.send_at_command_hardware('AT+CGPS=1', 'OK', 2.0)
             if success:
                 self.init_step = 3
                 self.gps_initialized_hardware = True
                 self.get_logger().info('GNSS module initialized for hardware mode.')
-            else: self.init_step = 0 # Retry init
+            else: self.init_step = 0
 
 
-        elif self.init_step == 3 and self.gps_initialized_hardware: # Ready to request data
+        elif self.init_step == 3 and self.gps_initialized_hardware:
             self.get_logger().debug('Requesting GNSS info (AT+CGPSINFO)...')
             success, response_data = self.send_at_command_hardware('AT+CGPSINFO', '+CGPSINFO:', 2.0)
             if success:
                 info_part = response_data.split('+CGPSINFO:', 1)[-1].strip()
-                if ',,,,,,' in info_part or info_part == "": # Check for empty fix
+                if ',,,,,,' in info_part or info_part == "":
                      self.get_logger().info('GNSS fix not ready yet.')
                 else:
                     self.get_logger().info(f"GNSS data received: {info_part}")
                     self.publisher.publish(String(data=info_part))
-            # else: stay in init_step 3 and try again
-        else: # Should not happen, reset
+        else:
              self.get_logger().warn("GNSS in unexpected state, resetting initialization.")
              self.init_step = 0
              self.gps_initialized_hardware = False

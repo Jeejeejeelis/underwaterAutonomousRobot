@@ -32,7 +32,7 @@ class FloatSimulatorNode(Node):
         self.x = 0.0
         self.y = 0.0
         self.current_depth_m = 0.0
-        self.target_depth_m = 0.0 # This will be controlled by a subscription
+        self.target_depth_m = 0.0
         self.target_depth_received = False
 
         self.vx_mps = self.get_parameter('sim_target_vx').value # Simulated X velocity
@@ -54,11 +54,11 @@ class FloatSimulatorNode(Node):
         self.target_depth_sub = self.create_subscription(Float32, 'target_depth', self.target_depth_callback, 10)
 
         # Publishers for simulated raw sensor data
-        self.sim_pressure_pub = self.create_publisher(Float32, 'sim_pressure_raw', 10) # dbar
-        self.sim_dvl_vx_pub = self.create_publisher(Float32, 'sim_dvl_raw_vx', 10)       # m/s
-        self.sim_dvl_vy_pub = self.create_publisher(Float32, 'sim_dvl_raw_vy', 10)       # m/s
-        self.sim_dvl_vz_pub = self.create_publisher(Float32, 'sim_dvl_raw_vz', 10)       # m/s
-        self.sim_dvl_alt_pub = self.create_publisher(Float32, 'sim_dvl_raw_altitude', 10) # m
+        self.sim_pressure_pub = self.create_publisher(Float32, 'sim_pressure_raw', 10)
+        self.sim_dvl_vx_pub = self.create_publisher(Float32, 'sim_dvl_raw_vx', 10)
+        self.sim_dvl_vy_pub = self.create_publisher(Float32, 'sim_dvl_raw_vy', 10)
+        self.sim_dvl_vz_pub = self.create_publisher(Float32, 'sim_dvl_raw_vz', 10)
+        self.sim_dvl_alt_pub = self.create_publisher(Float32, 'sim_dvl_raw_altitude', 10)
 
         # Publishers for ground truth from simulator
         self.ground_truth_depth_pub = self.create_publisher(Float32, 'sim_ground_truth_depth', 10)
@@ -88,7 +88,7 @@ class FloatSimulatorNode(Node):
             return
         self.last_time = now
 
-        # Simple depth controller
+        # Depth controller
         if self.target_depth_received:
             depth_error = self.target_depth_m - self.current_depth_m
             kp = self.get_parameter('depth_kp').value
@@ -99,9 +99,9 @@ class FloatSimulatorNode(Node):
 
         # Update position
         self.current_depth_m += self.vz_mps * dt
-        if self.current_depth_m < 0: # Cannot go above surface
+        if self.current_depth_m < 0:
             self.current_depth_m = 0
-            if self.vz_mps < 0: self.vz_mps = 0 # Stop ascending if at surface
+            if self.vz_mps < 0: self.vz_mps = 0
 
         self.x += self.vx_mps * dt
         self.y += self.vy_mps * dt
@@ -109,12 +109,11 @@ class FloatSimulatorNode(Node):
         # Update simulated altitude
         seafloor_depth_m = self.get_parameter('sim_seafloor_depth_m').value
         self.altitude_agl_m = seafloor_depth_m - self.current_depth_m
-        if self.altitude_agl_m < 0: # Cannot go below seafloor
+        if self.altitude_agl_m < 0:
             self.altitude_agl_m = 0
-            self.current_depth_m = seafloor_depth_m # Correct depth if "passed through" seafloor
-            if self.vz_mps > 0: self.vz_mps = 0 # Stop descending if at seafloor
+            self.current_depth_m = seafloor_depth_m
+            if self.vz_mps > 0: self.vz_mps = 0
 
-        # Publish ground truth TF
         t = TransformStamped()
         t.header.stamp = now.to_msg()
         t.header.frame_id = self.world_frame
@@ -133,7 +132,7 @@ class FloatSimulatorNode(Node):
         self.sim_pressure_pub.publish(Float32(data=self.current_depth_m * METERS_TO_DBAR))
         self.sim_dvl_vx_pub.publish(Float32(data=self.vx_mps))
         self.sim_dvl_vy_pub.publish(Float32(data=self.vy_mps))
-        self.sim_dvl_vz_pub.publish(Float32(data=self.vz_mps)) # DVL measures velocity of the float
+        self.sim_dvl_vz_pub.publish(Float32(data=self.vz_mps))
         self.sim_dvl_alt_pub.publish(Float32(data=self.altitude_agl_m))
 
         # Publish ground truth values
