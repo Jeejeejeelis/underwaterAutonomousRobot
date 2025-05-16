@@ -3,277 +3,295 @@
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float32, Bool # Assuming Bool for GNSS fix status for simplicity
+from std_msgs.msg import Float32
 from sensor_msgs.msg import NavSatFix # For actual GNSS status
 
 # Import the custom service
-from my_robot_package.srv import SetMission # Replace my_robot_package with your actual package name
+from my_robot_package.srv import SetMission
 
 # Define states for clarity
 class MissionPhase:
     IDLE = "IDLE"
-    # Layer Scan Phases
     LS_DESCENDING_TO_BOTTOM = "LS_DESCENDING_TO_BOTTOM"
-    LS_AT_BOTTOM_TRANSITION = "LS_AT_BOTTOM_TRANSITION" # Brief phase to ensure stability or log
     LS_ASCENDING_TO_SURFACE = "LS_ASCENDING_TO_SURFACE"
     LS_AT_SURFACE_WAITING = "LS_AT_SURFACE_WAITING"
-    # Target Depth Hold Phases
     TDH_DESCENDING_TO_HOLD = "TDH_DESCENDING_TO_HOLD"
     TDH_HOLDING_AT_DEPTH = "TDH_HOLDING_AT_DEPTH"
-    TDH_ASCENDING_TO_SURFACE = "TDH_ASCENDING_TO_SURFACE" # Or to a defined end depth
+    TDH_ASCENDING_TO_SURFACE = "TDH_ASCENDING_TO_SURFACE"
     MISSION_COMPLETE = "MISSION_COMPLETE"
 
 class MissionControlNode(Node):
     def __init__(self):
         super().__init__('mission_control_node')
 
-        # Parameters
-        self.declare_parameter('control_loop_period_sec', 1.0) # Main loop frequency
-        self.declare_parameter('depth_tolerance_m', 0.5)      # How close to target depth is "close enough"
-        self.declare_parameter('default_surface_depth_m', 0.5) # Standard depth for "surfacing"
-        self.declare_parameter('min_safe_altitude_agl_m', 1.5) # Minimum safe altitude from DVL for bottom scan
+        # Parameters for depths: Sea Surface is Z=0. Depths are NEGATIVE. Altitudes are POSITIVE.
+        self.declare_parameter('control_loop_period_sec', 1.0)
+        self.declare_parameter('depth_tolerance_m', 0.5)      # Tolerance for reaching a target Z
+        # Default target Z for "surfacing", e.g., -0.5 means 0.5m below surface.
+        self.declare_parameter('default_surface_z_m', -0.5)
+        self.declare_parameter('min_safe_altitude_agl_m', 1.5) # Min POSITIVE altitude from DVL
 
         self.control_loop_period = self.get_parameter('control_loop_period_sec').get_parameter_value().double_value
         self.depth_tolerance = self.get_parameter('depth_tolerance_m').get_parameter_value().double_value
-        self.default_surface_depth = self.get_parameter('default_surface_depth_m').get_parameter_value().double_value
+        # Storing as default_surface_z_m for clarity, it's a negative Z value
+        self.default_surface_z_m = self.get_parameter('default_surface_z_m').get_parameter_value().double_value
         self.min_safe_altitude_agl = self.get_parameter('min_safe_altitude_agl_m').get_parameter_value().double_value
+        
+        # Ensure default_surface_z_m is negative or zero.
+        if self.default_surface_z_m > 0:
+            self.get_logger().warn(f"Parameter 'default_surface_z_m' ({self.default_surface_z_m}) should be <= 0. Setting to -0.5.")
+            self.default_surface_z_m = -0.5
+
 
         # State variables
         self.current_mission_mode = SetMission.Request.MISSION_IDLE
         self.current_mission_phase = MissionPhase.IDLE
+        # Publisher for /target_depth (expects POSITIVE depth value for simulator/controller)
         self.target_depth_publisher = self.create_publisher(Float32, 'target_depth', 10)
 
-        # Mission parameters (populated by service call)
         self.mission_params = {}
         self.mission_timer_start_time = None
         self.mission_wait_duration = 0.0
         self.remaining_scan_cycles = 0
 
         # Subscriptions
-        self.current_depth_m = None
-        self.seafloor_depth_m = None # Depth of seafloor from surface (positive)
-        self.dvl_altitude_agl_m = None # Altitude from DVL (positive)
+        self.current_z_m = None      # Current Z position of the robot (negative for depth)
+        self.seafloor_z_m = None     # Z position of the seafloor (negative)
+        self.dvl_altitude_agl_m = None # Altitude from DVL (positive AGL)
         self.has_gnss_fix = False
 
-
-# PROBLEM HERE! shouldnt we get depth from drone depth?
-# 
+        # Subscribing to /drone_depth which provides negative Z
         self.depth_subscription = self.create_subscription(
-            Float32, 'depth_m', self.depth_callback, 10) # From ctd_node (or fused estimator)
+            Float32, 'drone_depth', self.drone_depth_callback, 10)
+        # Subscribing to /seafloor_depth which provides negative Z
         self.seafloor_depth_subscription = self.create_subscription(
-            Float32, 'seafloor_depth_m', self.seafloor_depth_callback, 10) # From depth_calculator
+            Float32, 'seafloor_depth', self.seafloor_depth_callback, 10)
+        # Subscribing to /altitude which provides positive AGL
         self.dvl_altitude_subscription = self.create_subscription(
-            Float32, 'dvl/altitude_agl', self.dvl_altitude_callback, 10) # From dvl_node
+            Float32, 'altitude', self.dvl_altitude_callback, 10)
         self.gnss_status_subscription = self.create_subscription(
-            NavSatFix, '/gps/fix', self.gnss_status_callback, 10) # From gnss_node
+            NavSatFix, '/gps/fix', self.gnss_status_callback, 10)
 
-        # Service Server
         self.set_mission_srv = self.create_service(SetMission, 'set_mission', self.set_mission_callback)
-
-        # Main control loop timer
         self.control_timer = self.create_timer(self.control_loop_period, self.control_loop)
+        self.get_logger().info("Mission Control Node initialized (Depths are Negative Z). Waiting for mission commands.")
 
-        self.get_logger().info("Mission Control Node initialized. Waiting for mission commands.")
-
-    def depth_callback(self, msg):
-        self.current_depth_m = msg.data
-        # self.get_logger().debug(f"Received depth: {self.current_depth_m:.2f}m")
-
+    def drone_depth_callback(self, msg):
+        self.current_z_m = msg.data # Directly store negative Z
+        # self.get_logger().debug(f"Received current_z_m: {self.current_z_m:.2f}m")
 
     def seafloor_depth_callback(self, msg):
-        self.seafloor_depth_m = msg.data
-        # self.get_logger().debug(f"Received seafloor depth: {self.seafloor_depth_m:.2f}m")
+        self.seafloor_z_m = msg.data # Directly store negative Z
+        # self.get_logger().debug(f"Received seafloor_z_m: {self.seafloor_z_m:.2f}m")
 
     def dvl_altitude_callback(self, msg):
-        self.dvl_altitude_agl_m = msg.data
-        # self.get_logger().debug(f"Received DVL altitude: {self.dvl_altitude_agl_m:.2f}m")
+        self.dvl_altitude_agl_m = msg.data # Positive AGL
+        # self.get_logger().debug(f"Received DVL altitude AGL: {self.dvl_altitude_agl_m:.2f}m")
 
     def gnss_status_callback(self, msg: NavSatFix):
-        # STATUS_NO_FIX = -1, STATUS_FIX = 0, STATUS_SBAS_FIX = 1, STATUS_GBAS_FIX = 2
         if msg.status.status >= NavSatFix.STATUS_FIX:
             self.has_gnss_fix = True
-            # self.get_logger().debug("GNSS Fix Acquired.")
         else:
             self.has_gnss_fix = False
-            # self.get_logger().debug("GNSS No Fix.")
 
-    def publish_target_depth(self, depth_m):
+    def publish_target_depth(self, target_z_negative):
+        """
+        Publishes the target depth to the /target_depth topic.
+        The /target_depth topic expects a POSITIVE depth value (depth below surface).
+        This function converts the internal negative Z target to a positive depth.
+        """
         msg = Float32()
-        msg.data = float(max(0.0, depth_m)) # Ensure target depth is not negative (above surface)
+        positive_target_depth = -target_z_negative # Convert negative Z to positive depth
+        # Ensure the command to the controller is non-negative (0 is surface)
+        msg.data = float(max(0.0, positive_target_depth))
         self.target_depth_publisher.publish(msg)
-        self.get_logger().info(f"Publishing target depth: {msg.data:.2f}m")
+        self.get_logger().info(f"Publishing target depth for controller: {msg.data:.2f}m (from internal target Z: {target_z_negative:.2f}m)")
 
-    def is_at_target_depth(self, target_depth_m):
-        if self.current_depth_m is None:
+    def is_at_target_z(self, target_z_m): # Renamed for clarity
+        if self.current_z_m is None:
             return False
-        return abs(self.current_depth_m - target_depth_m) < self.depth_tolerance
+        # Both current_z_m and target_z_m are negative. Difference is small if close.
+        return abs(self.current_z_m - target_z_m) < self.depth_tolerance
 
     def start_timer(self, duration_sec):
         self.mission_timer_start_time = self.get_clock().now()
         self.mission_wait_duration = duration_sec
 
     def is_timer_expired(self):
-        if self.mission_timer_start_time is None:
-            return False
+        if self.mission_timer_start_time is None: return False
         elapsed_time = (self.get_clock().now() - self.mission_timer_start_time).nanoseconds / 1e9
         return elapsed_time >= self.mission_wait_duration
 
     def set_mission_callback(self, request: SetMission.Request, response: SetMission.Response):
-        self.get_logger().info(f"Received set_mission request: Mode='{request.mission_mode}'")
+        self.get_logger().info(f"Received set_mission request: Mode='{request.mission_mode}'. Depths in request should be NEGATIVE Z.")
         self.current_mission_mode = request.mission_mode
+        
+        # Parameters from service request. Depths here are expected to be NEGATIVE Z.
+        # Altitude (scan_bottom_target_altitude_m) is POSITIVE AGL.
         self.mission_params = {
-            'scan_bottom_target_altitude_m': request.scan_bottom_target_altitude_m,
-            'scan_surface_target_depth_m': request.scan_surface_target_depth_m,
+            'scan_bottom_target_altitude_m': request.scan_bottom_target_altitude_m, # Positive AGL
+            'scan_surface_target_z_m': request.scan_surface_target_depth_m,       # Negative Z
             'scan_surface_wait_time_sec': request.scan_surface_wait_time_sec,
             'scan_cycles': request.scan_cycles,
-            'hold_target_depth_m': request.hold_target_depth_m,
+            'hold_target_z_m': request.hold_target_depth_m,                       # Negative Z
             'hold_duration_sec': request.hold_duration_sec,
         }
-        self.mission_timer_start_time = None # Reset timer
+        self.mission_timer_start_time = None
+
+        # Validate incoming depth parameters to be negative (or zero for surface)
+        if self.mission_params['scan_surface_target_z_m'] > 0:
+            self.get_logger().error(f"scan_surface_target_depth_m ({self.mission_params['scan_surface_target_z_m']}) must be <= 0. Aborting mission set.")
+            response.success = False; response.message = "Invalid scan_surface_target_depth_m (must be <=0)"; return response
+        if self.mission_params['hold_target_z_m'] > 0:
+            self.get_logger().error(f"hold_target_depth_m ({self.mission_params['hold_target_z_m']}) must be <= 0. Aborting mission set.")
+            response.success = False; response.message = "Invalid hold_target_depth_m (must be <=0)"; return response
 
         if self.current_mission_mode == SetMission.Request.MISSION_IDLE:
             self.current_mission_phase = MissionPhase.IDLE
-            response.success = True
-            response.message = "Transitioning to IDLE mode."
+            response.success = True; response.message = "Transitioning to IDLE mode."
         elif self.current_mission_mode == SetMission.Request.MISSION_LAYER_SCAN:
             if self.mission_params['scan_bottom_target_altitude_m'] < self.min_safe_altitude_agl:
                 self.get_logger().warn(f"Requested scan altitude {self.mission_params['scan_bottom_target_altitude_m']}m is below min safe altitude {self.min_safe_altitude_agl}m. Adjusting.")
                 self.mission_params['scan_bottom_target_altitude_m'] = self.min_safe_altitude_agl
-
             self.current_mission_phase = MissionPhase.LS_DESCENDING_TO_BOTTOM
             self.remaining_scan_cycles = self.mission_params['scan_cycles']
-            response.success = True
-            response.message = "Starting LAYER_SCAN mission."
+            response.success = True; response.message = "Starting LAYER_SCAN mission."
         elif self.current_mission_mode == SetMission.Request.MISSION_TARGET_DEPTH_HOLD:
             self.current_mission_phase = MissionPhase.TDH_DESCENDING_TO_HOLD
-            response.success = True
-            response.message = "Starting TARGET_DEPTH_HOLD mission."
+            response.success = True; response.message = "Starting TARGET_DEPTH_HOLD mission."
         else:
             self.get_logger().error(f"Unknown mission mode: {self.current_mission_mode}")
-            self.current_mission_mode = SetMission.Request.MISSION_IDLE # Revert to IDLE
+            self.current_mission_mode = SetMission.Request.MISSION_IDLE
             self.current_mission_phase = MissionPhase.IDLE
-            response.success = False
-            response.message = "Unknown mission mode requested."
+            response.success = False; response.message = "Unknown mission mode requested."
         
         self.get_logger().info(f"Transitioned to Phase: {self.current_mission_phase}")
         return response
 
     def control_loop(self):
-        if self.current_depth_m is None:
-            self.get_logger().warn("Current depth unknown, mission control paused.", throttle_duration_sec=5)
-            # Optionally publish a safe surface depth if completely lost
-            # self.publish_target_depth(self.default_surface_depth)
+        if self.current_z_m is None:
+            self.get_logger().warn("Current Z (depth) unknown, mission control paused.", throttle_duration_sec=5)
+            # self.publish_target_depth(self.default_surface_z_m) # Command to surface if depth is lost
             return
 
-        # --- IDLE Mode ---
         if self.current_mission_phase == MissionPhase.IDLE:
-            # In IDLE, try to maintain current depth or a safe surface depth
-            # For a float, "maintaining current depth" might mean minimal buoyancy adjustment
-            # or slowly surfacing if no target. Let's make it surface gently.
-            self.publish_target_depth(self.default_surface_depth)
-            # self.get_logger().info("In IDLE phase, maintaining surface depth.", throttle_duration_sec=10)
+            self.publish_target_depth(self.default_surface_z_m) # Target a default surface Z
 
-        # --- TARGET_DEPTH_HOLD Mode ---
         elif self.current_mission_phase == MissionPhase.TDH_DESCENDING_TO_HOLD:
-            target = self.mission_params['hold_target_depth_m']
-            self.publish_target_depth(target)
-            if self.is_at_target_depth(target):
-                self.get_logger().info(f"Reached hold depth {target:.2f}m. Starting hold.")
+            target_z = self.mission_params['hold_target_z_m'] # Negative Z
+            self.publish_target_depth(target_z)
+            if self.is_at_target_z(target_z):
+                self.get_logger().info(f"Reached hold Z {target_z:.2f}m. Starting hold.")
                 self.current_mission_phase = MissionPhase.TDH_HOLDING_AT_DEPTH
                 self.start_timer(self.mission_params['hold_duration_sec'])
 
         elif self.current_mission_phase == MissionPhase.TDH_HOLDING_AT_DEPTH:
-            target = self.mission_params['hold_target_depth_m']
-            self.publish_target_depth(target) # Continue publishing to ensure hold
+            target_z = self.mission_params['hold_target_z_m'] # Negative Z
+            self.publish_target_depth(target_z)
             if self.is_timer_expired():
-                self.get_logger().info(f"Hold duration expired. Ascending to surface.")
+                self.get_logger().info("Hold duration expired. Ascending to surface Z.")
                 self.current_mission_phase = MissionPhase.TDH_ASCENDING_TO_SURFACE
-                self.mission_timer_start_time = None # Reset timer
+                self.mission_timer_start_time = None
 
         elif self.current_mission_phase == MissionPhase.TDH_ASCENDING_TO_SURFACE:
-            target = self.default_surface_depth
-            self.publish_target_depth(target)
-            if self.is_at_target_depth(target):
-                self.get_logger().info("Reached surface after hold. Mission complete.")
-                self.current_mission_phase = MissionPhase.MISSION_COMPLETE # Or IDLE
+            target_z = self.default_surface_z_m # Negative Z
+            self.publish_target_depth(target_z)
+            if self.is_at_target_z(target_z):
+                self.get_logger().info("Reached surface Z after hold. Mission complete.")
+                self.current_mission_phase = MissionPhase.MISSION_COMPLETE
 
-        # --- LAYER_SCAN Mode ---
         elif self.current_mission_phase == MissionPhase.LS_DESCENDING_TO_BOTTOM:
-            if self.seafloor_depth_m is None and self.dvl_altitude_agl_m is None:
-                self.get_logger().warn("Seafloor depth and DVL altitude unknown. Cannot descend for layer scan. Holding current depth or surfacing.", throttle_duration_sec=5)
-                self.publish_target_depth(self.current_depth_m) # Hold current or surface
-                # Potentially: self.current_mission_phase = MissionPhase.IDLE (abort scan)
+            if self.seafloor_z_m is None and self.dvl_altitude_agl_m is None:
+                self.get_logger().warn("Seafloor Z and DVL altitude unknown. Cannot descend for layer scan. Holding current Z or surfacing.", throttle_duration_sec=5)
+                self.publish_target_depth(self.current_z_m if self.current_z_m is not None else self.default_surface_z_m)
                 return
 
-            target_scan_depth = -1.0
-            if self.seafloor_depth_m is not None:
-                target_scan_depth = self.seafloor_depth_m - self.mission_params['scan_bottom_target_altitude_m']
-            elif self.dvl_altitude_agl_m is not None: # Use DVL if seafloor_depth isn't available or preferred
-                # This requires knowing current depth to calculate target_depth for the controller
-                target_scan_depth = self.current_depth_m + (self.dvl_altitude_agl_m - self.mission_params['scan_bottom_target_altitude_m'])
+            target_scan_z = 0.0 # Default to surface Z if logic fails
+            # seafloor_z_m is negative. scan_bottom_target_altitude_m is positive.
+            if self.seafloor_z_m is not None:
+                target_scan_z = self.seafloor_z_m + self.mission_params['scan_bottom_target_altitude_m']
+                # e.g., -100m (seafloor) + 1.5m (alt) = -98.5m (target Z)
+            # current_z_m is negative. dvl_altitude_agl_m & scan_bottom_target_altitude_m are positive.
+            elif self.dvl_altitude_agl_m is not None and self.current_z_m is not None:
+                target_scan_z = self.current_z_m + (self.dvl_altitude_agl_m - self.mission_params['scan_bottom_target_altitude_m'])
+                # e.g., -90m (current Z) + (5m (AGL) - 1.5m (target AGL)) = -90m + 3.5m = -86.5m (target Z)
+            else: # Should not happen due to check above, but as a fallback
+                 self.get_logger().error("Cannot determine target_scan_z for LS_DESCENDING_TO_BOTTOM. Critical sensor data missing unexpectedly.")
+                 self.publish_target_depth(self.default_surface_z_m) # Safety surface
+                 self.current_mission_phase = MissionPhase.IDLE # Abort scan
+                 return
+
+            # Safety check: Ensure target_scan_z is not shallower (less negative) than default_surface_z_m
+            # And also ensure it's not deeper than the known seafloor_z_m (if available)
+            if target_scan_z > self.default_surface_z_m:
+                self.get_logger().warn(f"Calculated scan bottom Z {target_scan_z:.2f}m is shallower than default surface Z {self.default_surface_z_m:.2f}m. Adjusting deeper.")
+                # Adjust to be a bit deeper than default surface Z, e.g., default_surface_z - 1.0m
+                target_scan_z = self.default_surface_z_m - 1.0 
+            if self.seafloor_z_m is not None and target_scan_z < self.seafloor_z_m: # target is deeper than seafloor
+                 self.get_logger().warn(f"Calculated scan bottom Z {target_scan_z:.2f}m is deeper than known seafloor Z {self.seafloor_z_m:.2f}m. Clamping to seafloor + min_safe_altitude.")
+                 target_scan_z = self.seafloor_z_m + self.min_safe_altitude_agl
 
 
-            if target_scan_depth < self.default_surface_depth: # Safety check if calculated target is too shallow
-                 target_scan_depth = self.default_surface_depth + 1.0 # Go at least a bit down
-                 self.get_logger().warn(f"Calculated scan bottom depth is too shallow. Setting to {target_scan_depth:.2f}m")
-
-
-            self.publish_target_depth(target_scan_depth)
-            # Condition to transition: either reached calculated depth or DVL altitude is met
-            at_target_depth = self.is_at_target_depth(target_scan_depth)
-            at_target_altitude = False
+            self.publish_target_depth(target_scan_z) # target_scan_z is negative Z
+            
+            at_target_z_condition = self.is_at_target_z(target_scan_z)
+            at_target_altitude_condition = False
             if self.dvl_altitude_agl_m is not None:
-                at_target_altitude = abs(self.dvl_altitude_agl_m - self.mission_params['scan_bottom_target_altitude_m']) < self.depth_tolerance # Using depth_tolerance for altitude too
+                at_target_altitude_condition = abs(self.dvl_altitude_agl_m - self.mission_params['scan_bottom_target_altitude_m']) < self.depth_tolerance # Using depth_tolerance for altitude proximity
 
-            if at_target_depth or at_target_altitude:
-                self.get_logger().info(f"Reached scan bottom (Depth: {self.current_depth_m:.2f}m, DVL Alt: {self.dvl_altitude_agl_m if self.dvl_altitude_agl_m is not None else 'N/A'}m). Transitioning to ascend.")
+            if at_target_z_condition or at_target_altitude_condition:
+                self.get_logger().info(f"Reached scan bottom (Current Z: {self.current_z_m:.2f}m, Target Z: {target_scan_z:.2f}m, DVL Alt: {self.dvl_altitude_agl_m if self.dvl_altitude_agl_m is not None else 'N/A'}m). Transitioning to ascend.")
                 self.current_mission_phase = MissionPhase.LS_ASCENDING_TO_SURFACE
 
         elif self.current_mission_phase == MissionPhase.LS_ASCENDING_TO_SURFACE:
-            target = self.mission_params['scan_surface_target_depth_m']
-            self.publish_target_depth(target)
-            if self.is_at_target_depth(target):
-                self.get_logger().info(f"Reached scan surface depth {target:.2f}m. Starting surface wait.")
+            target_z = self.mission_params['scan_surface_target_z_m'] # Negative Z
+            self.publish_target_depth(target_z)
+            if self.is_at_target_z(target_z):
+                self.get_logger().info(f"Reached scan surface Z {target_z:.2f}m. Starting surface wait.")
                 self.current_mission_phase = MissionPhase.LS_AT_SURFACE_WAITING
                 self.start_timer(self.mission_params['scan_surface_wait_time_sec'])
 
         elif self.current_mission_phase == MissionPhase.LS_AT_SURFACE_WAITING:
-            target = self.mission_params['scan_surface_target_depth_m']
-            self.publish_target_depth(target) # Maintain surface depth
-            self.get_logger().info(f"Waiting at surface. GNSS Fix: {self.has_gnss_fix}. Time remaining: {(self.mission_wait_duration - (self.get_clock().now() - self.mission_timer_start_time).nanoseconds / 1e9):.1f}s", throttle_duration_sec=5)
+            target_z = self.mission_params['scan_surface_target_z_m'] # Negative Z
+            self.publish_target_depth(target_z)
+            # Logging timer correctly:
+            time_remaining_str = "N/A"
+            if self.mission_timer_start_time is not None:
+                 elapsed = (self.get_clock().now() - self.mission_timer_start_time).nanoseconds / 1e9
+                 time_remaining = self.mission_wait_duration - elapsed
+                 time_remaining_str = f"{time_remaining:.1f}s"
+
+            self.get_logger().info(f"Waiting at surface Z {target_z:.2f}m. GNSS Fix: {self.has_gnss_fix}. Time remaining: {time_remaining_str}", throttle_duration_sec=5)
 
             if self.is_timer_expired():
                 self.get_logger().info("Surface wait time expired.")
-                self.mission_timer_start_time = None # Reset timer
-                if self.remaining_scan_cycles > 0:
-                    self.remaining_scan_cycles -= 1
-                    self.get_logger().info(f"Cycles remaining: {self.remaining_scan_cycles}")
-                
-                if self.mission_params['scan_cycles'] == 0 or self.remaining_scan_cycles > 0 : # Indefinite or cycles left
+                self.mission_timer_start_time = None
+                if self.mission_params['scan_cycles'] != 0: # 0 means indefinite, >0 means fixed cycles
+                    if self.remaining_scan_cycles > 0:
+                        self.remaining_scan_cycles -= 1
+                    self.get_logger().info(f"Cycles remaining: {self.remaining_scan_cycles if self.mission_params['scan_cycles'] > 0 else 'indefinite'}")
+
+                if self.mission_params['scan_cycles'] == 0 or self.remaining_scan_cycles > 0:
                     self.get_logger().info("Starting next scan cycle.")
                     self.current_mission_phase = MissionPhase.LS_DESCENDING_TO_BOTTOM
-                else:
+                else: # scan_cycles > 0 and remaining_scan_cycles == 0
                     self.get_logger().info("All scan cycles complete. Layer scan mission finished.")
-                    self.current_mission_phase = MissionPhase.MISSION_COMPLETE # Or IDLE
+                    self.current_mission_phase = MissionPhase.MISSION_COMPLETE
 
-        # --- MISSION_COMPLETE ---
         elif self.current_mission_phase == MissionPhase.MISSION_COMPLETE:
-            self.get_logger().info("Mission complete. Returning to IDLE behavior (surfacing).", throttle_duration_sec=10)
-            # For now, just go to IDLE which will surface it.
-            # Could also publish a specific "mission end depth"
-            self.current_mission_phase = MissionPhase.IDLE # Transition to IDLE
+            self.get_logger().info("Mission complete. Returning to IDLE behavior (surfacing to default Z).", throttle_duration_sec=10)
+            self.current_mission_phase = MissionPhase.IDLE
             self.current_mission_mode = SetMission.Request.MISSION_IDLE
-
 
 def main(args=None):
     rclpy.init(args=args)
-    mission_control_node = MissionControlNode()
+    node = MissionControlNode()
     try:
-        rclpy.spin(mission_control_node)
+        rclpy.spin(node)
     except KeyboardInterrupt:
-        mission_control_node.get_logger().info("Mission Control Node interrupted.")
+        node.get_logger().info("Mission Control Node interrupted.")
     finally:
-        mission_control_node.destroy_node()
+        node.destroy_node()
         rclpy.shutdown()
 
 if __name__ == '__main__':
