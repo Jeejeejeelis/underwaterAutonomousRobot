@@ -55,6 +55,9 @@ class MissionControlNode(Node):
         self.dvl_altitude_agl_m = None # Altitude from DVL (positive)
         self.has_gnss_fix = False
 
+
+# PROBLEM HERE! shouldnt we get depth from drone depth?
+# 
         self.depth_subscription = self.create_subscription(
             Float32, 'depth_m', self.depth_callback, 10) # From ctd_node (or fused estimator)
         self.seafloor_depth_subscription = self.create_subscription(

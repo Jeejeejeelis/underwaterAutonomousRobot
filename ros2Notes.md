@@ -137,3 +137,17 @@ ros2 service call /set_mission my_robot_package/srv/SetMission "{mission_mode: '
 # Usage: {mission_mode: 'LAYER_SCAN', scan_bottom_target_altitude_m: ALTITUDE_AGL, scan_surface_target_depth_m: SURFACE_DEPTH, scan_surface_wait_time_sec: WAIT_TIME, scan_cycles: NUM_CYCLES}
 # (Set scan_cycles: 0 for indefinite)
 ros2 service call /set_mission my_robot_package/srv/SetMission "{mission_mode: 'LAYER_SCAN', scan_bottom_target_altitude_m: 2.0, scan_surface_target_depth_m: 0.5, scan_surface_wait_time_sec: 60.0, scan_cycles: 2}"
+
+
+
+ros2 service call /set_mission my_robot_package/srv/SetMission "{
+  mission_mode: 'TARGET_DEPTH_HOLD',
+  hold_target_depth_m: 10.0,
+  hold_duration_sec: 30.0,
+  scan_bottom_target_altitude_m: 0.0,
+  scan_surface_target_depth_m: 0.0,
+  scan_surface_wait_time_sec: 0.0,
+  scan_cycles: 0
+}"
+
+# Mission control not getting depth!
