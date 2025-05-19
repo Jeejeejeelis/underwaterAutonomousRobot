@@ -9,7 +9,6 @@
 
 import RPi.GPIO as GPIO
 import time
-GPIO.setmode(GPIO.BCM)
  
 # GPIO pin setup
 up_pin = 5 # brown
@@ -17,15 +16,24 @@ down_pin = 6 # red
 encoder_pin = 27
 up_limit = 26 # green
 down_limit = 19 # yellow
-GPIO.setup(up_pin, GPIO.OUT)
-GPIO.setup(down_pin, GPIO.OUT)
-GPIO.setup(encoder_pin, GPIO.IN)
-GPIO.setup(down_limit, GPIO.IN)
-GPIO.setup(up_limit, GPIO.IN)
+
+def setup():
+  print("setup")
+  GPIO.setmode(GPIO.BCM)
+  GPIO.setup(up_pin, GPIO.OUT)
+  GPIO.setup(down_pin, GPIO.OUT)
+  GPIO.setup(encoder_pin, GPIO.IN)
+  GPIO.setup(down_limit, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+  GPIO.setup(up_limit, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+  GPIO.output(up_pin, False)
+  GPIO.output(down_pin, False)
+  print(f"down: {down_limit}, up: {up_limit}")
 
 def move_up():
+  print("moving up")
   while True:
     if GPIO.input(up_limit):
+      print("up limit hit, stopping")
       GPIO.output(up_pin, False)
       GPIO.output(down_pin, False)
     else:
@@ -33,8 +41,10 @@ def move_up():
       GPIO.output(down_pin, False)
 
 def move_down():
+  print("moving down")
   while True:
     if GPIO.input(down_limit):
+      print("down limit hit, stopping")
       GPIO.output(up_pin, False)
       GPIO.output(down_pin, False)
     else:
@@ -42,10 +52,17 @@ def move_down():
       GPIO.output(down_pin, True)
 
 def main():
-  time.sleep(2)
-  move_down()
-  time.sleep(2)
-  move_up()
+  try:
+    setup()
+    time.sleep(2)
+    move_down()
+    time.sleep(2)
+    move_up()
+  except KeyboardInterrupt:
+    return
+  finally:
+    print("exiting")
+    GPIO.cleanup()
 
 main()
 
