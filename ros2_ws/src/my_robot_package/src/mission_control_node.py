@@ -7,7 +7,6 @@ from sensor_msgs.msg import NavSatFix
 
 from my_robot_package.srv import SetMission
 
-# Define states
 class MissionPhase:
     IDLE = "IDLE"
     LS_DESCENDING_TO_BOTTOM = "LS_DESCENDING_TO_BOTTOM"
@@ -192,7 +191,7 @@ class MissionControlNode(Node):
                 self.publish_target_depth(self.current_z_m if self.current_z_m is not None else self.default_surface_z_m)
                 return
 
-            target_scan_z = 0.0 # Default to surface Z if logic fails
+            target_scan_z = 0.0
             if self.seafloor_z_m is not None:
                 target_scan_z = self.seafloor_z_m + self.mission_params['scan_bottom_target_altitude_m']
             elif self.dvl_altitude_agl_m is not None and self.current_z_m is not None:

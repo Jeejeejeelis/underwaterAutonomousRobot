@@ -143,7 +143,7 @@ ros2 service call /set_mission my_robot_package/srv/SetMission "{mission_mode: '
 ros2 service call /set_mission my_robot_package/srv/SetMission "{mission_mode: 'IDLE'}"
 
 # Target depth hold mode:
-ros2 service call /set_mission my_robot_package/srv/SetMission "{mission_mode: 'TARGET_DEPTH_HOLD', hold_target_depth_m: -25.0, hold_duration_sec: 300.0}"
+ros2 service call /set_mission my_robot_package/srv/SetMission "{mission_mode: 'TARGET_DEPTH_HOLD', hold_target_depth_m: -25.0, hold_duration_sec: 30.0}"
 
 
 

@@ -114,7 +114,7 @@ class DVLNode(Node):
             self.get_logger().debug(f"Published Sim DVL: Vx={self.sim_vx:.3f}, Vy={self.sim_vy:.3f}, Vz={self.sim_vz:.3f}, Alt={self.sim_altitude:.2f}")
 
     def publish_averaged_hardware_data(self):
-        if self.simulate: return # This timer is only for hardware
+        if self.simulate: return
 
         now = self.get_clock().now()
         if self.measurement_count > 0:
@@ -135,7 +135,7 @@ class DVLNode(Node):
         self.last_publish_time = now
 
     def read_and_accumulate_hardware_dvl(self):
-        if self.simulate: return # Only for hardware
+        if self.simulate: return
         if not self.sock:
             self.get_logger().warn("No DVL connection, attempting to reconnect in read_and_accumulate...")
             self.connect()

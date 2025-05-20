@@ -20,7 +20,7 @@ class GPSNode(Node):
         self.declare_parameter('simulate', True)
         self.declare_parameter('serial_port_gnss', "/dev/ttyUSB2")
         self.declare_parameter('baud_rate_gnss', 115200)
-        self.declare_parameter('timer_period_gnss', 2.0) # How often to request/publish GPS data
+        self.declare_parameter('timer_period_gnss', 2.0)
 
         self.simulate = self.get_parameter('simulate').get_parameter_value().bool_value
         self.serial_port = self.get_parameter('serial_port_gnss').value

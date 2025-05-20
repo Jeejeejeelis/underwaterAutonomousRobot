@@ -5,21 +5,18 @@ import time
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float32, String, Int32 # Added Int32 for encoder
+from std_msgs.msg import Float32, String, Int32
 
 import launch
 import launch_ros.actions
 import launch_testing.actions
 import launch_testing
 
-# Define default values that might be used across nodes for consistency in tests
 DEFAULT_NEUTRAL_TICKS = 10890 # Max ticks / 2 =>  21 781 / 2 = 10 890
 
 def generate_test_description():
-    # Common parameters for nodes, assuming wall time for tests
     common_parameters = [{'use_sim_time': False}]
 
-    # Sensor nodes (as before)
     ctd_node = launch_ros.actions.Node(
         package='my_robot_package',
         executable='ctd.py',
@@ -42,16 +39,14 @@ def generate_test_description():
         parameters=[{'simulate': True}] + common_parameters
     )
 
-    # New nodes for motor control and simulation
     float_simulator_node = launch_ros.actions.Node(
         package='my_robot_package',
         executable='float_simulator.py',
         name='float_simulator_node',
         output='screen',
         parameters=[
-            {'motor_control_mode_active': True}, # Test interaction with motorControl
+            {'motor_control_mode_active': True},
             {'neutral_buoyancy_ticks': DEFAULT_NEUTRAL_TICKS},
-            # other float_simulator params can use defaults or be set here
         ] + common_parameters
     )
 
@@ -71,7 +66,7 @@ def generate_test_description():
         name='motor_controller_node',
         output='screen',
         parameters=[
-            {'motor_control_active': True}, # Activate its logic (will use mock GPIO)
+            {'motor_control_active': True},
             {'neutral_buoyancy_ticks': DEFAULT_NEUTRAL_TICKS},
         ] + common_parameters
     )
@@ -93,8 +88,6 @@ def generate_test_description():
         'motor_controller_node': motor_controller_node,
     }
 
-# --- Dummy Subscribers/Publishers for new tests ---
-
 class DummyEncoderSubscriber(Node):
     def __init__(self, topic_name='/current_encoder_position'):
         super().__init__('dummy_encoder_subscriber')
@@ -111,7 +104,7 @@ class DummyEncoderSubscriber(Node):
         self.get_logger().info(f"EncoderSub - Received encoder data: {msg.data}")
 
 class DummyVzSubscriber(Node):
-    def __init__(self, topic_name='/sim_dvl_raw_vz'): # Assuming this is the vertical speed from simulator
+    def __init__(self, topic_name='/sim_dvl_raw_vz'):
         super().__init__('dummy_vz_subscriber')
         self.subscription = self.create_subscription(
             Float32,
@@ -137,14 +130,12 @@ class DummyEncoderPublisher(Node):
         self.publisher_.publish(msg)
         self.get_logger().info(f"EncoderPub - Published encoder data: {value}")
 
-
-# --- Existing Dummy Subscribers (CTD, DVL, GNSS) ---
 class DummyCTDSubscriber(Node):
     def __init__(self):
         super().__init__('dummy_ctd_subscriber')
         self.subscription = self.create_subscription(
             Float32,
-            'temperature', # Assuming ctd_node publishes 'temperature'
+            'temperature',
             self.listener_callback,
             10)
         self.received_data = []
@@ -159,7 +150,7 @@ class DummyDVLSubscriber(Node):
         super().__init__('dummy_dvl_subscriber')
         self.subscription = self.create_subscription(
             Float32,
-            'vx', # Assuming dvl_node publishes 'vx'
+            'vx',
             self.listener_callback,
             10)
         self.received_data = []
@@ -173,7 +164,7 @@ class DummyGNSSSubscriber(Node):
     def __init__(self):
         super().__init__('dummy_gnss_subscriber')
         self.subscription = self.create_subscription(
-            String, # Assuming gnss_node publishes String for 'gps_data'
+            String,
             'gps_data',
             self.listener_callback,
             10)
@@ -185,12 +176,10 @@ class DummyGNSSSubscriber(Node):
         self.get_logger().info(f"GNSS - Received gps_data: {msg.data}")
 
 
-# --- Test Classes ---
 @launch_testing.post_shutdown_test()
 class TestAllNodesSimulated(unittest.TestCase):
 
-    # Existing tests for CTD, DVL, GNSS (ensure topics match what nodes publish)
-    def test_ctd_dummy_data_publishing(self, proc_output, ctd_node): # Removed unused dvl_node, gnss_node
+    def test_ctd_dummy_data_publishing(self, proc_output, ctd_node):
         rclpy.init()
         try:
             node = DummyCTDSubscriber()
@@ -203,7 +192,7 @@ class TestAllNodesSimulated(unittest.TestCase):
             node.destroy_node()
             rclpy.shutdown()
 
-    def test_dvl_dummy_data_publishing(self, proc_output, dvl_node): # Removed unused ctd_node, gnss_node
+    def test_dvl_dummy_data_publishing(self, proc_output, dvl_node):
         rclpy.init()
         try:
             node = DummyDVLSubscriber()
@@ -216,7 +205,7 @@ class TestAllNodesSimulated(unittest.TestCase):
             node.destroy_node()
             rclpy.shutdown()
 
-    def test_gnss_dummy_data_publishing(self, proc_output, gnss_node): # Removed unused ctd_node, dvl_node
+    def test_gnss_dummy_data_publishing(self, proc_output, gnss_node):
         rclpy.init()
         try:
             node = DummyGNSSSubscriber()
@@ -232,20 +221,16 @@ class TestAllNodesSimulated(unittest.TestCase):
             node.destroy_node()
             rclpy.shutdown()
 
-    # --- New tests for motor and simulator nodes ---
 
     def test_init_neutral_buoyancy_publishes_encoder(self, proc_output, init_neutral_buoyancy_node):
         rclpy.init()
         try:
             node = DummyEncoderSubscriber(topic_name='/current_encoder_position')
-            end_time = time.time() + 7.0 # Give it a bit more time to initialize and publish
+            end_time = time.time() + 7.0
             initial_value_received = False
             while time.time() < end_time:
                 rclpy.spin_once(node, timeout_sec=0.1)
                 if node.received_data:
-                    # With mock GPIO, it should publish its starting value (0) or the target if the mock was more advanced.
-                    # Given the current mock, it will likely publish 0 repeatedly or get stuck.
-                    # We are checking if *any* Int32 is published.
                     self.assertIsInstance(node.received_data[0], int)
                     initial_value_received = True
                     break
@@ -263,9 +248,7 @@ class TestAllNodesSimulated(unittest.TestCase):
             while time.time() < end_time:
                 rclpy.spin_once(node, timeout_sec=0.1)
                 if node.received_data:
-                    # Expected to publish its initial encoder count (neutral_buoyancy_ticks).
                     self.assertIsInstance(node.received_data[0], int)
-                    # self.assertEqual(node.received_data[0], DEFAULT_NEUTRAL_TICKS) # This might be too strict if init node overrides it first
                     initial_value_received = True
                     break
             self.assertTrue(initial_value_received, "No encoder data received from motor_controller_node.")
@@ -279,40 +262,30 @@ class TestAllNodesSimulated(unittest.TestCase):
         vz_sub_node = None
         try:
             encoder_pub_node = DummyEncoderPublisher(topic_name='/current_encoder_position')
-            vz_sub_node = DummyVzSubscriber(topic_name='/sim_dvl_raw_vz') # Check correct Vz topic
-
-            # Let nodes initialize and simulator to publish initial Vz (likely 0)
-            time.sleep(2) # Allow initial publications
+            vz_sub_node = DummyVzSubscriber(topic_name='/sim_dvl_raw_vz')
+            time.sleep(2)
             rclpy.spin_once(encoder_pub_node, timeout_sec=0.1)
             rclpy.spin_once(vz_sub_node, timeout_sec=0.1)
-            vz_sub_node.received_data.clear() # Clear any initial Vz
+            vz_sub_node.received_data.clear()
 
-            # Publish an encoder position that should cause ascent (e.g., less than neutral)
-            # Min ticks is 0, neutral is DEFAULT_NEUTRAL_TICKS (e.g. 10890)
-            # Max speed at limits is 0.5 m/s
-            # Speed = ( (neutral - encoder) / (neutral - min) ) * max_speed
-            # If encoder = 0, speed = max_speed (0.5)
-            test_encoder_value_ascent = DEFAULT_NEUTRAL_TICKS // 2 # Should cause positive Vz
+            test_encoder_value_ascent = DEFAULT_NEUTRAL_TICKS // 2
             encoder_pub_node.publish(test_encoder_value_ascent)
 
             end_time = time.time() + 5.0
             ascent_vz_received = False
             while time.time() < end_time:
-                rclpy.spin_once(encoder_pub_node, timeout_sec=0.05) # Keep publishing
+                rclpy.spin_once(encoder_pub_node, timeout_sec=0.05)
                 rclpy.spin_once(vz_sub_node, timeout_sec=0.1)
                 if vz_sub_node.received_data:
                     # self.get_logger().info(f"Simulator Vz received: {vz_sub_node.received_data[-1]}")
-                    if vz_sub_node.received_data[-1] > 0.01: # Check for significant positive speed
+                    if vz_sub_node.received_data[-1] > 0.01:
                         ascent_vz_received = True
                         break
-                    # else: # Keep clearing if it's still zero from before
-                        # vz_sub_node.received_data.clear()
-                encoder_pub_node.publish(test_encoder_value_ascent) # Re-publish periodically
+                encoder_pub_node.publish(test_encoder_value_ascent)
 
             self.assertTrue(ascent_vz_received, "Float simulator did not show positive Vz for ascent encoder value.")
             if vz_sub_node.received_data : self.assertGreater(vz_sub_node.received_data[-1], 0.0, "Expected positive Vz for ascent.")
 
-            # Clear and test descent
             vz_sub_node.received_data.clear()
             time.sleep(0.5)
 
@@ -326,7 +299,7 @@ class TestAllNodesSimulated(unittest.TestCase):
                 rclpy.spin_once(vz_sub_node, timeout_sec=0.1)
                 if vz_sub_node.received_data:
                      # self.get_logger().info(f"Simulator Vz received: {vz_sub_node.received_data[-1]}")
-                    if vz_sub_node.received_data[-1] < -0.01: # Check for significant negative speed
+                    if vz_sub_node.received_data[-1] < -0.01:
                         descent_vz_received = True
                         break
                     # else:
