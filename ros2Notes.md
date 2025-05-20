@@ -144,3 +144,28 @@ ros2 service call /set_mission my_robot_package/srv/SetMission "{mission_mode: '
 
 # Target depth hold mode:
 ros2 service call /set_mission my_robot_package/srv/SetMission "{mission_mode: 'TARGET_DEPTH_HOLD', hold_target_depth_m: -25.0, hold_duration_sec: 300.0}"
+
+
+
+# Piston info
+ We determined that it took 21 781 revolutions of our motor to pull the piston from its lowest point to its 
+highest point. 
+In order to get to the "neutral buoyancy", the piston should be set to halfway. This means the encoder should have 21 781/2 =10 890!
+
+
+# run composite mode
+ros2 launch my_robot_package robot_launch.py simulate:=True motorControl:=True
+
+
+# Instructions for testing in lab with composite mode active!
+Check GPIO connection, and that motor is powered!
+Pull latest GIT to RPi!
+navigate to ~/ros2_ws
+delete old compiled files with: rm -rf build install log
+make sure we have sourced ros2: source /opt/ros/humble/setup.bash
+Give permissions to all python files: chmod +x *.py
+Compile: colcon build --symlink-install --packages-select my_robot_package
+Source: source install/setup.bash
+Run composite mode: ros2 launch my_robot_package robot_launch.py simulate:=True motorControl:=True
+Wait until init_neutral_buoyancy has finished!
+

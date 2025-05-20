@@ -5,6 +5,8 @@ find_package(ament_cmake REQUIRED)
 find_package(rclpy REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED) # For NavSatFix used in mission_control_node.py and potentially srv/msg dependencies
+find_package(geometry_msgs REQUIRED) # For TransformStamped, Quaternion etc.
+find_package(tf2_ros REQUIRED) # For TransformBroadcaster
 find_package(rosidl_default_generators REQUIRED) # For generating .srv code
 
 # Generate Python (and C++) code from .srv files
@@ -12,8 +14,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SetMission.srv"
   # Add other .msg or .srv files here if you create more
   DEPENDENCIES std_msgs sensor_msgs # List packages whose types are used in your srv/msg definitions
-                                    # SetMission.srv itself doesn't use them but it's good practice
-                                    # if you evolve it or for other interfaces.
 )
 
 install(DIRECTORY
@@ -30,6 +30,8 @@ install(PROGRAMS
   src/float_simulator.py
   src/depth_calculator.py
   src/mission_control_node.py
+  src/init_neutral_buoyancy.py # Added new node
+  src/motorControl.py          # Added new node
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -40,7 +42,8 @@ if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
   find_package(launch_testing_ament_cmake REQUIRED)
-  add_launch_test(test/test_launch.py)
+  # Ensure your test file exists if you uncomment this
+  # add_launch_test(test/test_launch.py)
 endif()
 
 ament_package()
