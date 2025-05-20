@@ -106,6 +106,16 @@ These instructions guide you through setting up and running the AUV software on 
     * The `float_simulator_node` will have its vertical speed driven by the real encoder values.
     * You can now proceed with testing.
 
+4. **Give mission prompt**
+# Layer scan mode
+ros2 service call /set_mission my_robot_package/srv/SetMission "{mission_mode: 'LAYER_SCAN', scan_bottom_target_altitude_m: 2.0, scan_surface_target_depth_m: -0.5, scan_surface_wait_time_sec: 60.0, scan_cycles: 2}"
+
+# Idle mode
+ros2 service call /set_mission my_robot_package/srv/SetMission "{mission_mode: 'IDLE'}"
+
+# Target depth hold mode:
+ros2 service call /set_mission my_robot_package/srv/SetMission "{mission_mode: 'TARGET_DEPTH_HOLD', hold_target_depth_m: -25.0, hold_duration_sec: 30.0}"
+
 ## IV. Troubleshooting & Important Notes
 
 * **GPIO Access Permissions:** If errors like "No access to /dev/gpiomem" occur, ensure the user is in the `gpio` group (`sudo usermod -a -G gpio your_username`, then **reboot**).
