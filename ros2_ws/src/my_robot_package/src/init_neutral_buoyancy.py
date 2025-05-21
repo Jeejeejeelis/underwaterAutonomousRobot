@@ -47,7 +47,7 @@ except ImportError:
 MOTOR_GLOBALS = {
     'UP_PIN': 5,        # Wire: Brown. Physical Action: Piston IN, Volume DECREASE, UAV DESCENDS.
     'DOWN_PIN': 6,      # Wire: Red.   Physical Action: Piston OUT, Volume INCREASE, UAV ASCENDS.
-    'ENCODER_PIN': 27,
+    'ENCODER_PIN': 14,
     'UP_LIMIT_PIN': 26, # Green wire. Hit when piston is fully IN (min volume, max encoder ticks).
     'DOWN_LIMIT_PIN': 19, # Yellow wire. Hit when piston is fully OUT (max volume, min encoder ticks = 0).
 

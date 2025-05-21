@@ -9,60 +9,100 @@
 
 import RPi.GPIO as GPIO
 import time
- 
+
 # GPIO pin setup
-up_pin = 5 # brown
-down_pin = 6 # red
-encoder_pin = 27
-up_limit = 26 # green
-down_limit = 19 # yellow
+up_pin = 5 # brown (Assuming BCM 5 is wired to motor up)
+down_pin = 6 # red (Assuming BCM 6 is wired to motor down)
+encoder_pin = 23
+up_limit = 19 # green (Assuming BCM 19 is up_limit)
+down_limit = 26 # yellow (Assuming BCM 26 is down_limit)
+
+# Global variable to store encoder ticks
+encoder_ticks = 0
+
+def encoder_tick_callback(channel):
+  """Callback function executed on each encoder tick."""
+  global encoder_ticks
+  encoder_ticks += 1
+  print(f"Tick! Total: {encoder_ticks}")
 
 def setup():
   print("setup")
+  GPIO.setwarnings(False)
   GPIO.setmode(GPIO.BCM)
-  GPIO.setup(up_pin, GPIO.OUT)
-  GPIO.setup(down_pin, GPIO.OUT)
-  GPIO.setup(encoder_pin, GPIO.IN)
+  GPIO.setup(up_pin, GPIO.OUT, initial=GPIO.LOW)
+  GPIO.setup(down_pin, GPIO.OUT, initial=GPIO.LOW)
+  GPIO.setup(encoder_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
   GPIO.setup(down_limit, GPIO.IN, pull_up_down=GPIO.PUD_UP)
   GPIO.setup(up_limit, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+
+  GPIO.add_event_detect(encoder_pin, GPIO.BOTH, callback=encoder_tick_callback, bouncetime=2) 
   GPIO.output(up_pin, False)
   GPIO.output(down_pin, False)
-  print(f"down: {down_limit}, up: {up_limit}")
+  time.sleep(1)
+  print(f"Initial limit switch states: Down: {GPIO.input(down_limit)}, Up: {GPIO.input(up_limit)}")
+  print("GPIO setup complete.")
 
 def move_up():
-  print("moving up")
+  print(f"MOVE UP states: Down: {GPIO.input(down_limit)}, Up: {GPIO.input(up_limit)}")
+  print("Moving up...")
+  start_time = time.time()
   while True:
-    if GPIO.input(up_limit):
-      print("up limit hit, stopping")
+    if not GPIO.input(up_limit):
+      print("Up limit hit, stopping motor.")
       GPIO.output(up_pin, False)
       GPIO.output(down_pin, False)
+      return
     else:
       GPIO.output(up_pin, True)
       GPIO.output(down_pin, False)
 
 def move_down():
-  print("moving down")
+  print("Moving down...")
+  start_time = time.time()
   while True:
-    if GPIO.input(down_limit):
-      print("down limit hit, stopping")
+    if not GPIO.input(down_limit):
+      print("Down limit hit, stopping motor.")
       GPIO.output(up_pin, False)
       GPIO.output(down_pin, False)
+      return
     else:
       GPIO.output(up_pin, False)
       GPIO.output(down_pin, True)
 
 def main():
+  global encoder_ticks
   try:
     setup()
-    time.sleep(2)
+    print(f"Initial encoder ticks: {encoder_ticks}")
+
+    # Move to the down limit first
+    print("\nMoving to the down limit switch...")
+    print(f"New limit switch states: Down: {GPIO.input(down_limit)}, Up: {GPIO.input(up_limit)}")
     move_down()
-    time.sleep(2)
+    print(f"Ticks accumulated after moving to down limit: {encoder_ticks}")
+
+    # Reset ticks to specifically measure the upward travel
+    print("\nResetting tick count.")
+    encoder_ticks = 0
+    #time.sleep(1)
+
+    # Move from down limit to up limit and count ticks
+    print(f"Moving from down limit to up limit. Current ticks: {encoder_ticks}")
     move_up()
+    print(f"\n--- Encoder ticks from down limit to up limit: {encoder_ticks} ---")
+
+    
+
   except KeyboardInterrupt:
-    return
+    print("\nKeyboard interrupt detected. Stopping motor and cleaning up.")
+  except Exception as e:
+    print(f"An error occurred: {e}")
   finally:
-    print("exiting")
+    print("Exiting program.")
+    GPIO.output(up_pin, False) # Ensure motor is off
+    GPIO.output(down_pin, False)
     GPIO.cleanup()
 
-main()
-
+if __name__ == '__main__':
+  main()

@@ -43,13 +43,6 @@ The system consists of several ROS 2 nodes that handle sensor data, simulate flo
     cd ~/ros2_ws/src
     # Clone the repository
     git clone [https://github.com/Jeejeejeelis/underwaterAutonomousRobot.git](https://github.com/Jeejeejeelis/underwaterAutonomousRobot.git)
-    # Now, ensure your ROS package (my_robot_package) is directly under src.
-    # If the 'underwaterAutonomousRobot' repo itself IS 'my_robot_package', you're good.
-    # If 'my_robot_package' is a sub-directory within 'underwaterAutonomousRobot',
-    # you might need to move it or ensure your paths reflect that, e.g.,
-    # mv underwaterAutonomousRobot/my_robot_package .  (if my_robot_package is one level down)
-    # Or, adjust subsequent cd commands if you keep the 'underwaterAutonomousRobot' directory.
-    # For this README, we'll assume 'my_robot_package' is now directly in '~/ros2_ws/src/'
     cd .. 
     ```
     *For simplicity, ensure the package named `my_robot_package` (containing `CMakeLists.txt`, `package.xml`, etc.) is located at `~/ros2_ws/src/my_robot_package/`.*
