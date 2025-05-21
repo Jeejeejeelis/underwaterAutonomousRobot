@@ -13,7 +13,7 @@ import time
 # GPIO pin setup
 up_pin = 5 # brown (Assuming BCM 5 is wired to motor up)
 down_pin = 6 # red (Assuming BCM 6 is wired to motor down)
-encoder_pin = 23
+encoder_pin = 24
 up_limit = 19 # green (Assuming BCM 19 is up_limit)
 down_limit = 26 # yellow (Assuming BCM 26 is down_limit)
 
@@ -24,7 +24,7 @@ def encoder_tick_callback(channel):
   """Callback function executed on each encoder tick."""
   global encoder_ticks
   encoder_ticks += 1
-  print(f"Tick! Total: {encoder_ticks}")
+  #print(f"Tick! Total: {encoder_ticks}")
 
 def setup():
   print("setup")
@@ -44,7 +44,6 @@ def setup():
   print("GPIO setup complete.")
 
 def move_up():
-  print(f"MOVE UP states: Down: {GPIO.input(down_limit)}, Up: {GPIO.input(up_limit)}")
   print("Moving up...")
   start_time = time.time()
   while True:
@@ -78,7 +77,6 @@ def main():
 
     # Move to the down limit first
     print("\nMoving to the down limit switch...")
-    print(f"New limit switch states: Down: {GPIO.input(down_limit)}, Up: {GPIO.input(up_limit)}")
     move_down()
     print(f"Ticks accumulated after moving to down limit: {encoder_ticks}")
 
