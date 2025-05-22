@@ -6,7 +6,7 @@ GPIO.setmode(GPIO.BCM)
 # GPIO pin setup
 up_pin = 17
 down_pin = 18
-encoder_pin = 27
+encoder_pin = 24
 up_limit = 22
 down_limit = 23
 GPIO.setup(up_pin, GPIO.OUT)

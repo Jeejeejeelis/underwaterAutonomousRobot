@@ -44,19 +44,20 @@ except ImportError:
             if pin in self._event_callbacks: del self._event_callbacks[pin]
     if GPIO is None and not REAL_GPIO_AVAILABLE: GPIO = GPIOMock()
 
+
 MOTOR_GLOBALS = {
     'UP_PIN': 5,        # Wire: Brown. Physical Action: Piston IN, Volume DECREASE, UAV DESCENDS.
     'DOWN_PIN': 6,      # Wire: Red.   Physical Action: Piston OUT, Volume INCREASE, UAV ASCENDS.
-    'ENCODER_PIN': 14,
-    'UP_LIMIT_PIN': 26, # Green wire. Hit when piston is fully IN (min volume, max encoder ticks).
-    'DOWN_LIMIT_PIN': 19, # Yellow wire. Hit when piston is fully OUT (max volume, min encoder ticks = 0).
+    'ENCODER_PIN': 24,
+    'UP_LIMIT_PIN': 19, # Green wire. Hit when piston is fully IN (min volume, max encoder ticks).
+    'DOWN_LIMIT_PIN': 26, # Yellow wire. Hit when piston is fully OUT (max volume, min encoder ticks = 0).
 
     'current_encoder_count': 0,
     'motor_moving': False,
     # movement_direction: 1 for Piston IN (Encoder INC), -1 for Piston OUT (Encoder DEC)
     'movement_direction': 0,
     'initialization_complete': False,
-    'neutral_buoyancy_encoder_target': 10890, # Target encoder count for neutral buoyancy. This should be axactly halfway for the piston!
+    'neutral_buoyancy_encoder_target': 10876, # Target encoder count for neutral buoyancy. This should be axactly halfway for the piston!
 }
 if not REAL_GPIO_AVAILABLE:
     if GPIOMock._mock_motor_pin_config_ref is None:
@@ -91,6 +92,7 @@ class InitNeutralBuoyancyNode(Node):
             GPIO.setup(MOTOR_GLOBALS['UP_LIMIT_PIN'], GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
             GPIO.add_event_detect(MOTOR_GLOBALS['ENCODER_PIN'], GPIO.BOTH, callback=encoder_callback, bouncetime=2)
+            time.sleep(1) #Important, otherwise nothing works!
             self.get_logger().info(f"GPIO initialized. PistonIN/Descend Pin: {MOTOR_GLOBALS['UP_PIN']}, PistonOUT/Ascend Pin: {MOTOR_GLOBALS['DOWN_PIN']}")
 
         except Exception as e:

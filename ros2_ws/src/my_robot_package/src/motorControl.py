@@ -43,9 +43,9 @@ except (RuntimeError, ModuleNotFoundError, ImportError):
 MOTOR_PIN_CONFIG = {
     'UP_PIN': 5,        # Wire: Brown. Physical Action: Piston IN, Volume DECREASE, UAV DESCENDS.
     'DOWN_PIN': 6,      # Wire: Red.   Physical Action: Piston OUT, Volume INCREASE, UAV ASCENDS.
-    'ENCODER_PIN': 14,
-    'UP_LIMIT_PIN': 26, # Green wire. Hit when piston is fully IN (min volume).
-    'DOWN_LIMIT_PIN': 19, # Yellow wire. Hit when piston is fully OUT (max volume).
+    'ENCODER_PIN': 24,
+    'UP_LIMIT_PIN': 19, # Green wire. Hit when piston is fully IN (min volume).
+    'DOWN_LIMIT_PIN': 26, # Yellow wire. Hit when piston is fully OUT (max volume).
 }
 if not REAL_GPIO_AVAILABLE:
     if GPIOMock._mock_motor_pin_config_ref is None:
@@ -70,8 +70,8 @@ class MotorControllerNode(Node):
         super().__init__('motor_controller_node')
 
         self.declare_parameter('motor_control_active', True)
-        self.declare_parameter('neutral_buoyancy_ticks', 10890)
-        self.declare_parameter('max_encoder_ticks', 21780)
+        self.declare_parameter('neutral_buoyancy_ticks', 10876)
+        self.declare_parameter('max_encoder_ticks', 21753)
         self.declare_parameter('min_encoder_ticks', 0)
         self.declare_parameter('depth_kp', 0.1)
         self.declare_parameter('depth_tolerance_m', 0.1)
@@ -126,6 +126,7 @@ class MotorControllerNode(Node):
             GPIO.setup(MOTOR_PIN_CONFIG['UP_LIMIT_PIN'], GPIO.IN, pull_up_down=GPIO.PUD_UP)
             GPIO.setup(MOTOR_PIN_CONFIG['DOWN_LIMIT_PIN'], GPIO.IN, pull_up_down=GPIO.PUD_UP)
             GPIO.add_event_detect(MOTOR_PIN_CONFIG['ENCODER_PIN'], GPIO.BOTH, callback=encoder_tick_callback, bouncetime=2)
+            time.sleep(1) #IMPORTANT, otherwise nothing works!
             self.get_logger().info("GPIO initialized successfully for MotorControllerNode.")
         except Exception as e:
             self.get_logger().error(f"CRITICAL: GPIO initialization failed in MotorControllerNode: {e}")
