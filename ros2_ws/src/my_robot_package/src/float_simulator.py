@@ -32,7 +32,7 @@ class FloatSimulatorNode(Node):
         self.declare_parameter('neutral_buoyancy_ticks', 10890)
         self.declare_parameter('max_encoder_ticks', 21780) # Piston fully in (min volume)
         self.declare_parameter('min_encoder_ticks', 0)      # Piston fully out (max volume)
-        self.declare_parameter('max_speed_at_limits_mps', 1) # Max speed achievable at encoder limits
+        self.declare_parameter('max_speed_at_limits_mps', 1.0) # Max speed achievable at encoder limits
         self.declare_parameter('motor_control_mode_active', False) # True if motorControl.py is driving the piston
 
         self.x = 0.0
@@ -60,7 +60,7 @@ class FloatSimulatorNode(Node):
                 Int32, '/current_encoder_position', self.external_encoder_callback, 10)
             self.get_logger().info("Simulator listening to /current_encoder_position for motor state.")
         else:
-            self.get_logger().info("Simulator using internal PID and simulated encoder for speed calculation.")
+            self.get_logger().info("Simulator using internal PID for speed calculation.")
 
         self.target_depth_sub = self.create_subscription(Float32, 'target_depth', self.target_depth_callback, 10)
         self.sim_pressure_pub = self.create_publisher(Float32, 'sim_pressure_raw', 10)
@@ -81,7 +81,6 @@ class FloatSimulatorNode(Node):
     def external_encoder_callback(self, msg):
         if self.listen_to_external_encoder:
             self.current_encoder_position = float(msg.data)
-            # self.get_logger().debug(f"Received external encoder position: {self.current_encoder_position}")
 
     def target_depth_callback(self, msg):
         if msg.data >= 0:
@@ -89,8 +88,6 @@ class FloatSimulatorNode(Node):
             if not self.target_depth_received:
                 self.get_logger().info(f"Received initial target depth command: {self.target_depth_m:.2f} m (used by internal PID if active)")
                 self.target_depth_received = True
-            # else:
-                # self.get_logger().info(f"Received new target depth command: {self.target_depth_m:.2f} m")
         else:
             self.get_logger().warn(f"Received invalid target depth {msg.data:.2f} m.")
 
@@ -100,42 +97,33 @@ class FloatSimulatorNode(Node):
         if dt <= 0: return
         self.last_time = now
 
-        encoder_pos_for_calc = self.current_encoder_position
-
+        # If not listening to the motor controller, use a direct PID for vertical speed.
         if not self.listen_to_external_encoder:
             if self.target_depth_received:
                 depth_error = self.target_depth_m - self.current_depth_m
                 kp = self.get_parameter('depth_kp').value
-                pid_desired_vz = max(-self.max_limit_speed, min(self.max_limit_speed, kp * depth_error))
-
-                if abs(pid_desired_vz) < 0.001:
-                    encoder_pos_for_calc = float(self.neutral_ticks)
-                elif pid_desired_vz > 0:
-                    factor = pid_desired_vz / self.max_limit_speed
-                    encoder_pos_for_calc = self.neutral_ticks - factor * (self.neutral_ticks - self.min_ticks)
-                else:
-                    factor = abs(pid_desired_vz) / self.max_limit_speed
-                    encoder_pos_for_calc = self.neutral_ticks + factor * (self.max_ticks - self.neutral_ticks)              
-                encoder_pos_for_calc = max(float(self.min_ticks), min(float(self.max_ticks), encoder_pos_for_calc))
-                self.current_encoder_position = encoder_pos_for_calc
+                self.vz_mps = max(-self.max_limit_speed, min(self.max_limit_speed, kp * depth_error))
             else:
-                encoder_pos_for_calc = float(self.neutral_ticks)
-                self.current_encoder_position = encoder_pos_for_calc
-
-        if abs(encoder_pos_for_calc - self.neutral_ticks) < 1.0:
-            self.vz_mps = 0.0
-        elif encoder_pos_for_calc > self.neutral_ticks:
-            denominator = self.max_ticks - self.neutral_ticks
-            if denominator <= 0: denominator = 1.0
-            factor = (encoder_pos_for_calc - self.neutral_ticks) / denominator
-            self.vz_mps = -factor * self.max_limit_speed
-        else:
-            denominator = self.neutral_ticks - self.min_ticks
-            if denominator <= 0: denominator = 1.0
-            factor = (self.neutral_ticks - encoder_pos_for_calc) / denominator
-            self.vz_mps = factor * self.max_limit_speed
+                self.vz_mps = 0.0
         
-        self.vz_mps = max(-self.max_limit_speed, min(self.max_limit_speed, self.vz_mps))
+        # If listening to an external encoder, calculate speed based on its position.
+        else:
+            encoder_pos_for_calc = self.current_encoder_position
+            if abs(encoder_pos_for_calc - self.neutral_ticks) < 1.0:
+                self.vz_mps = 0.0
+            elif encoder_pos_for_calc > self.neutral_ticks:
+                denominator = self.max_ticks - self.neutral_ticks
+                if denominator <= 0: denominator = 1.0
+                factor = (encoder_pos_for_calc - self.neutral_ticks) / denominator
+                self.vz_mps = -factor * self.max_limit_speed
+            else:
+                denominator = self.neutral_ticks - self.min_ticks
+                if denominator <= 0: denominator = 1.0
+                factor = (self.neutral_ticks - encoder_pos_for_calc) / denominator
+                self.vz_mps = factor * self.max_limit_speed
+            
+            self.vz_mps = max(-self.max_limit_speed, min(self.max_limit_speed, self.vz_mps))
+
 
         self.current_depth_m += self.vz_mps * dt
         if self.current_depth_m < 0:
@@ -152,7 +140,6 @@ class FloatSimulatorNode(Node):
             self.current_depth_m = seafloor_depth_m
             if self.vz_mps > 0: self.vz_mps = 0
 
-        # TF transform
         t = TransformStamped()
         t.header.stamp = now.to_msg()
         t.header.frame_id = self.world_frame
@@ -164,16 +151,16 @@ class FloatSimulatorNode(Node):
         t.transform.rotation = Quaternion(x=qx, y=qy, z=qz, w=qw)
         self.tf_broadcaster.sendTransform(t)
 
-        # Publish simulated sensor data
-        self.sim_pressure_pub.publish(Float32(data=self.current_depth_m * METERS_TO_DBAR))
-        self.sim_dvl_vx_pub.publish(Float32(data=self.vx_mps))
-        self.sim_dvl_vy_pub.publish(Float32(data=self.vy_mps))
-        self.sim_dvl_vz_pub.publish(Float32(data=self.vz_mps))
-        self.sim_dvl_alt_pub.publish(Float32(data=self.altitude_agl_m))
+        # Defensively cast all data to float() before publishing to prevent TypeErrors
+        self.sim_pressure_pub.publish(Float32(data=float(self.current_depth_m * METERS_TO_DBAR)))
+        self.sim_dvl_vx_pub.publish(Float32(data=float(self.vx_mps)))
+        self.sim_dvl_vy_pub.publish(Float32(data=float(self.vy_mps)))
+        self.sim_dvl_vz_pub.publish(Float32(data=float(self.vz_mps)))
+        self.sim_dvl_alt_pub.publish(Float32(data=float(self.altitude_agl_m)))
 
-        self.ground_truth_depth_pub.publish(Float32(data=self.current_depth_m))
-        self.ground_truth_altitude_pub.publish(Float32(data=self.altitude_agl_m))
-        self.ground_truth_seafloor_z_pub.publish(Float32(data=-seafloor_depth_m))
+        self.ground_truth_depth_pub.publish(Float32(data=float(self.current_depth_m)))
+        self.ground_truth_altitude_pub.publish(Float32(data=float(self.altitude_agl_m)))
+        self.ground_truth_seafloor_z_pub.publish(Float32(data=float(-seafloor_depth_m)))
         self.sim_encoder_pub.publish(Int32(data=int(round(self.current_encoder_position))))
 
 
