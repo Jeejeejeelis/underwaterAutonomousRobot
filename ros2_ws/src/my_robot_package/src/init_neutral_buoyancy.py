@@ -231,22 +231,29 @@ def main(args=None):
     except Exception as e:
         init_node.get_logger().error(f"Unhandled exception in init_neutral_buoyancy_node main operation: {e}")
     finally:
-        init_node.get_logger().info(f"Entering finally block for {init_node.get_name()}.")
+        # Get the node name BEFORE destroying the node
+        node_name = "init_neutral_buoyancy_node"
+        if hasattr(init_node, 'get_name'):
+            try:
+                node_name = init_node.get_name()
+            except rclpy.exceptions.InvalidHandle:
+                # This can happen if the node is already partially destroyed
+                pass
+        
+        print(f"Entering finally block for {node_name}.") # Use the stored name
+        
         if hasattr(init_node, 'on_shutdown'):
              init_node.on_shutdown()
 
-        if hasattr(init_node, 'destroy_node') and hasattr(init_node, 'get_node_names') and init_node.get_node_names() and rclpy.ok():
-            init_node.get_logger().info(f"Destroying node {init_node.get_name()}.")
+        if hasattr(init_node, 'destroy_node') and rclpy.ok():
+            print(f"Destroying node {node_name}.") # Use the stored name
             init_node.destroy_node()
         
         if rclpy.ok():
-            print("Shutting down rclpy context for InitNeutralBuoyancyNode.")
+            print(f"Shutting down rclpy context for {node_name}.") # Use the stored name
             rclpy.shutdown()
         
-        node_name = "init_neutral_buoyancy_node"
-        if hasattr(init_node, 'get_name'):
-            node_name = init_node.get_name()
-        print(f"{node_name} (Python process) is terminating.")
-
+        print(f"{node_name} (Python process) is terminating.") # Use the stored name
+        
 if __name__ == '__main__':
     main()

@@ -136,7 +136,7 @@ class MotorControllerNode(Node):
         global current_encoder_count
         is_first_update_from_default = (current_encoder_count == self.neutral_ticks and msg.data != self.neutral_ticks)
         if abs(current_encoder_count - msg.data) > 5 or is_first_update_from_default:
-            self.get_logger().info(f"Received initial/updated encoder count: {msg.data}. Updating internal count from {current_encoder_count}.")
+            # self.get_logger().info(f"Received initial/updated encoder count: {msg.data}. Updating internal count from {current_encoder_count}.")
             current_encoder_count = msg.data
         # Unsubscribe form the topics:
         # self.destroy_subscription(self.initial_encoder_sub) 
@@ -165,7 +165,9 @@ class MotorControllerNode(Node):
 
         if self.target_depth_m is None or self.current_depth_m is None:
             if self.motor_is_moving: self._stop_motor_gpio()
+            self.get_logger().debug("Motor controller waiting for valid current and target depth to begin control.", throttle_duration_sec=5)
             return
+
 
         depth_error = self.target_depth_m - self.current_depth_m
         upper_limit_physical_hit = GPIO.input(MOTOR_PIN_CONFIG['UP_LIMIT_PIN']) == GPIO.LOW
@@ -245,28 +247,34 @@ class MotorControllerNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    global current_encoder_count, motor_movement_direction
-    current_encoder_count = 0
-    motor_movement_direction = 0
     
-    motor_controller_node = None
+    node = None
     try:
-        motor_controller_node = MotorControllerNode()
-        rclpy.spin(motor_controller_node)
-    except KeyboardInterrupt:
-        if motor_controller_node: motor_controller_node.get_logger().info('Keyboard interrupt, shutting down...')
-        else: print('Keyboard interrupt before node fully initialized.')
-    except Exception as e:
-        if motor_controller_node: motor_controller_node.get_logger().error(f"Unhandled exception: {e}")
-        else: print(f"Unhandled exception before node fully initialized: {e}")
-    finally:
-        if motor_controller_node:
-            motor_controller_node.on_shutdown()
-            if hasattr(motor_controller_node, 'get_node_names') and motor_controller_node.get_node_names() and rclpy.ok():
-                motor_controller_node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
-        print("rclpy shutdown complete for motor_controller_node.")
+        global current_encoder_count, motor_movement_direction
+        current_encoder_count = 0
+        motor_movement_direction = 0
+        
+        node = MotorControllerNode()
+        rclpy.spin(node)
 
-if __name__ == '__main__':
-    main()
+    except KeyboardInterrupt:
+        if node:
+            node.get_logger().info('Keyboard interrupt, shutting down...')
+
+    except Exception as e:
+        if node:
+            node.get_logger().fatal(f"Unhandled exception in MotorControllerNode: {e}")
+        else:
+            print(f"Exception before node was initialized: {e}")
+            
+    finally:
+        # This is the proper ROS2 shutdown sequence for a launched node.
+        # 1. The node cleans up its own resources (GPIO, etc.).
+        # 2. The node is explicitly destroyed.
+        # 3. rclpy.shutdown() is NOT called here. The launch service manages it.
+        if node:
+            node.get_logger().info("Cleaning up and destroying node...")
+            node.on_shutdown()
+            node.destroy_node()
+
+        print("motor_controller_node has been shutdown cleanly.")
