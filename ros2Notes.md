@@ -150,7 +150,7 @@ ros2 service call /set_mission my_robot_package/srv/SetMission "{mission_mode: '
 # Piston info
  We determined that it took 21 781 revolutions of our motor to pull the piston from its lowest point to its 
 highest point. 
-In order to get to the "neutral buoyancy", the piston should be set to halfway. This means the encoder should have 21 781/2 =10 890!
+In order to get to the "neutral buoyancy", the piston should be set to halfway. This means the encoder should have 21 781/2 =10 890!21781...we got which is 10876.5.. We'll use this number!
 
 
 # run composite mode
