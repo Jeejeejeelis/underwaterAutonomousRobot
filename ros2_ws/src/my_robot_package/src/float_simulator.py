@@ -33,7 +33,7 @@ class FloatSimulatorNode(Node):
         self.declare_parameter('neutral_buoyancy_ticks', 10890)
         self.declare_parameter('max_encoder_ticks', 21780)
         self.declare_parameter('min_encoder_ticks', 0)
-        self.declare_parameter('max_speed_at_limits_mps', 1.0)
+        self.declare_parameter('max_speed_at_limits_mps', 0.2)
         self.declare_parameter('motor_control_mode_active', False)
 
         # State variables are initialized but not used until the sim starts
