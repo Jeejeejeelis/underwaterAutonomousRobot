@@ -10,6 +10,7 @@ try:
     REAL_GPIO_AVAILABLE = True
 except (RuntimeError, ModuleNotFoundError, ImportError):
     REAL_GPIO_AVAILABLE = False
+    # ... (GPIOMock remains the same) ...
     class GPIOMock:
         BCM = "BCM_MODE"; OUT = "OUT_MODE"; IN = "IN_MODE"; PUD_UP = "PUD_UP_MODE"
         LOW = False; HIGH = True; BOTH = "BOTH_EDGES"
@@ -62,6 +63,7 @@ class MotorControllerNode(Node):
         super().__init__('motor_controller_node')
         self.get_logger().info("MotorControllerNode starting...")
 
+        # ... (parameters are the same) ...
         self.declare_parameter('motor_control_active', True)
         self.declare_parameter('neutral_buoyancy_ticks', 10876)
         self.declare_parameter('max_encoder_ticks', 21753)
@@ -87,55 +89,53 @@ class MotorControllerNode(Node):
         self.target_depth_value_received = False
         self.current_depth_value_received = False
         self.ready_to_control = False
-        self._gpio_initialized_by_other = False # New flag
 
-        if not REAL_GPIO_AVAILABLE:
-            self.get_logger().warn("RPi.GPIO library not found. Motor control will use MOCK GPIO.")
-        
-        if self.motor_control_active:
-            self.get_logger().info("Motor Controller node is ACTIVE.")
-            # We will NOT initialize GPIOs here. We'll wait for the init node.
-        else:
-            self.get_logger().info("Motor Controller node is INACTIVE.")
-
-        self.target_depth_sub = self.create_subscription(
-            Float32, '/target_depth', self.target_depth_callback, 10)
-        self.current_depth_sub = self.create_subscription(
-            Float32, 'drone_depth', self.current_depth_callback, 10) 
-        self.initial_encoder_sub = self.create_subscription(
-            Int32, '/current_encoder_position', self.initial_encoder_callback, rclpy.qos.qos_profile_sensor_data)
-
+        self.target_depth_sub = self.create_subscription(Float32, '/target_depth', self.target_depth_callback, 10)
+        self.current_depth_sub = self.create_subscription(Float32, 'drone_depth', self.current_depth_callback, 10) 
+        self.initial_encoder_sub = self.create_subscription(Int32, '/current_encoder_position', self.initial_encoder_callback, rclpy.qos.qos_profile_sensor_data)
         self.encoder_publisher = self.create_publisher(Int32, '/current_encoder_position', 10)
         self.motor_status_publisher = self.create_publisher(Bool, '/motor_moving_status', 10)
 
         loop_rate = self.get_parameter('control_loop_rate_hz').get_parameter_value().double_value
-        loop_period = 1.0 / loop_rate if loop_rate > 0 else 0.1
-        self.timer = self.create_timer(loop_period, self.control_loop)
+        self.timer = self.create_timer(1.0 / loop_rate, self.control_loop)
+        self.get_logger().info(f"MotorControllerNode initialized. Waiting for inputs to become ready...")
 
-        self.get_logger().info(f"MotorControllerNode initialized. Waiting for initial encoder position from init_neutral_buoyancy_node.")
 
     def _try_set_ready_to_control(self):
-        if not self.ready_to_control and \
-           self.initial_encoder_value_received and \
-           self.target_depth_value_received and \
-           self.current_depth_value_received:
-            
+        if not self.ready_to_control and self.initial_encoder_value_received and self.target_depth_value_received and self.current_depth_value_received:
             self.ready_to_control = True
             self.get_logger().info("MotorControl: All initial inputs received. Ready to control motor.")
+            # --- CHANGE: Initialize GPIOs now that this node is ready to take control ---
+            if self.motor_control_active:
+                self.get_logger().info("MotorControl: Initializing GPIOs for this node's use.")
+                self._init_gpio()
+
+    def _init_gpio(self):
+        try:
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setup(MOTOR_PIN_CONFIG['UP_PIN'], GPIO.OUT, initial=GPIO.LOW)
+            GPIO.setup(MOTOR_PIN_CONFIG['DOWN_PIN'], GPIO.OUT, initial=GPIO.LOW)
+            GPIO.setup(MOTOR_PIN_CONFIG['ENCODER_PIN'], GPIO.IN, pull_up_down=GPIO.PUD_UP)
+            GPIO.add_event_detect(MOTOR_PIN_CONFIG['ENCODER_PIN'], GPIO.BOTH, callback=encoder_tick_callback, bouncetime=2)
+            GPIO.setup(MOTOR_PIN_CONFIG['UP_LIMIT_PIN'], GPIO.IN, pull_up_down=GPIO.PUD_UP)
+            GPIO.setup(MOTOR_PIN_CONFIG['DOWN_LIMIT_PIN'], GPIO.IN, pull_up_down=GPIO.PUD_UP)
+            self._gpio_initialized_flag = True
+            self.get_logger().info("GPIO initialized successfully for MotorControllerNode.")
+        except Exception as e:
+            self.get_logger().fatal(f"CRITICAL: GPIO initialization failed in MotorControllerNode: {e}")
+            self.motor_control_active = False 
 
     def initial_encoder_callback(self, msg):
+        # ... (function is the same) ...
         global current_encoder_count
         if not self.initial_encoder_value_received:
             self.get_logger().info(f"MotorControl: Received initial encoder position: {msg.data}")
             current_encoder_count = msg.data
             self.initial_encoder_value_received = True
             self._try_set_ready_to_control()
-            # We assume that if we get this message, the init node has set up the GPIOs
-            self._gpio_initialized_by_other = True
-            self.get_logger().info("MotorControl: Assuming GPIOs are now initialized by init_neutral_buoyancy_node.")
-
 
     def target_depth_callback(self, msg):
+        # ... (function is the same) ...
         self.target_depth_m = msg.data
         if not self.target_depth_value_received:
             self.get_logger().info(f"MotorControl: Received first target depth: {msg.data:.2f}m")
@@ -143,13 +143,14 @@ class MotorControllerNode(Node):
             self._try_set_ready_to_control()
 
     def current_depth_callback(self, msg):
+        # ... (function is the same) ...
         self.current_depth_m = msg.data
         if not self.current_depth_value_received:
             self.current_depth_value_received = True
             self._try_set_ready_to_control()
 
-
     def control_loop(self):
+        # ... (function is the same) ...
         global current_encoder_count, motor_movement_direction
         
         enc_msg = Int32()
@@ -160,12 +161,7 @@ class MotorControllerNode(Node):
         motor_stat_msg.data = self.motor_is_moving
         self.motor_status_publisher.publish(motor_stat_msg)
 
-        if not self.motor_control_active:
-            if self.motor_is_moving: self._stop_motor_gpio()
-            return
-
-        if not self.ready_to_control:
-            self.get_logger().info("MotorControl: Not yet ready (waiting for initial encoder, target, and current depth).", throttle_duration_sec=5)
+        if not self.motor_control_active or not self.ready_to_control:
             return
         
         if self.target_depth_m is None or self.current_depth_m is None:
@@ -191,6 +187,7 @@ class MotorControllerNode(Node):
                     if self.motor_is_moving: self._stop_motor_gpio()
 
     def _command_ascent_gpio(self): 
+        # ... (function is the same) ...
         global motor_movement_direction
         if not self.motor_is_moving or motor_movement_direction != -1:
             self.get_logger().info("MotorControl: Commanding ASCEND.")
@@ -200,6 +197,7 @@ class MotorControllerNode(Node):
             self.motor_is_moving = True
 
     def _command_descend_gpio(self): 
+        # ... (function is the same) ...
         global motor_movement_direction
         if not self.motor_is_moving or motor_movement_direction != 1:
             self.get_logger().info("MotorControl: Commanding DESCEND.")
@@ -209,6 +207,7 @@ class MotorControllerNode(Node):
             self.motor_is_moving = True
 
     def _stop_motor_gpio(self):
+        # ... (function is the same) ...
         global motor_movement_direction
         if self.motor_is_moving:
             self.get_logger().info("MotorControl: Commanding STOP.")
@@ -219,24 +218,24 @@ class MotorControllerNode(Node):
 
     def on_shutdown(self):
         self.get_logger().info("Shutting down MotorControllerNode...") 
-        if self.motor_control_active and self._gpio_initialized_by_other:
-            self.get_logger().info("MotorControllerNode is shutting down; stopping motor.") 
+        if self.motor_control_active and hasattr(self, '_gpio_initialized_flag'):
+            self.get_logger().info("Attempting GPIO cleanup for MotorControllerNode.") 
             self._stop_motor_gpio()
-            # Do NOT call GPIO.cleanup() here, as the init node might still be running or another node might use it.
+            GPIO.cleanup() # This node is now responsible for its own cleanup
+            self.get_logger().info("GPIO cleanup complete for MotorControllerNode.")
 
 def main(args=None):
+    # ... (main function is the same) ...
     rclpy.init(args=args)
     node = None
     try:
-        global current_encoder_count, motor_movement_direction
-        motor_movement_direction = 0
         node = MotorControllerNode() 
         rclpy.spin(node)
     except KeyboardInterrupt:
         if node: node.get_logger().info('Keyboard interrupt, shutting down MotorControllerNode...')
     except Exception as e:
         if node: node.get_logger().fatal(f"Unhandled exception in MotorControllerNode: {e}")
-        else: print(f"Exception before node was initialized: {e}")
+        else: print(f"Exception before node was initialized in MotorControllerNode: {e}")
     finally:
         if node:
             node.on_shutdown() 

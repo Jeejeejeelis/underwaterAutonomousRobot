@@ -2,9 +2,10 @@
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Int32
+from std_msgs.msg import Int32, Bool # Import Bool
 import time
 
+# ... (GPIOMock and MOTOR_GLOBALS sections remain the same) ...
 try:
     import RPi.GPIO as GPIO
     REAL_GPIO_AVAILABLE = True
@@ -23,13 +24,11 @@ except ImportError:
 
         def __init__(self):
             self._pin_modes = {}; self._pin_states = {}; self._event_callbacks = {}
-            # In simulation, let's assume the limit switches are not pressed initially
             self._limit_switch_states = {}
             print("Mock RPi.GPIO initialized for InitNeutralBuoyancyNode.")
             if GPIOMock._mock_motor_pin_config_ref is None:
                 try:
                     GPIOMock._mock_motor_pin_config_ref = MOTOR_GLOBALS
-                    # Initialize limit switch states based on globals
                     self._limit_switch_states[MOTOR_GLOBALS.get('UP_LIMIT_PIN')] = self.HIGH
                     self._limit_switch_states[MOTOR_GLOBALS.get('DOWN_LIMIT_PIN')] = self.HIGH
                 except NameError:
@@ -42,34 +41,31 @@ except ImportError:
         def output(self, pin, state):
             if pin in self._pin_modes and self._pin_modes[pin] == self.OUT: self._pin_states[pin] = state
         def input(self, pin):
-            # Return the simulated state of the limit switch
             if pin in self._limit_switch_states:
                 return self._limit_switch_states[pin]
-            return self.LOW # Default to LOW for other inputs
+            return self.LOW
         def add_event_detect(self, pin, edge, callback=None, bouncetime=None): self._event_callbacks[pin] = callback
-        def cleanup(self): pass
+        def cleanup(self): 
+            print("SIMULATION: GPIO.cleanup() called.")
+            pass
         def remove_event_detect(self, pin):
             if pin in self._event_callbacks: del self._event_callbacks[pin]
         
-        # Helper method for simulation to trigger a limit switch
         def trigger_limit_switch(self, pin):
             if pin in self._limit_switch_states:
                 self._limit_switch_states[pin] = self.LOW
                 print(f"SIMULATION: Limit switch on pin {pin} triggered (LOW).")
-                # Automatically reset after a short delay to simulate the switch being released
                 time.sleep(0.1)
                 self._limit_switch_states[pin] = self.HIGH
 
-
     if GPIO is None and not REAL_GPIO_AVAILABLE: GPIO = GPIOMock()
 
-
 MOTOR_GLOBALS = {
-    'UP_PIN': 5,        # Wire: Brown. Physical Action: Piston IN, Volume DECREASE, UAV DESCENDS.
-    'DOWN_PIN': 6,      # Wire: Red.   Physical Action: Piston OUT, Volume INCREASE, UAV ASCENDS.
+    'UP_PIN': 5,
+    'DOWN_PIN': 6,
     'ENCODER_PIN': 24,
-    'UP_LIMIT_PIN': 19, # Green wire. Hit when piston is fully IN (min volume, max encoder ticks).
-    'DOWN_LIMIT_PIN': 26, # Yellow wire. Hit when piston is fully OUT (max volume, min encoder ticks = 0).
+    'UP_LIMIT_PIN': 19,
+    'DOWN_LIMIT_PIN': 26,
 
     'current_encoder_count': 0,
     'motor_moving': False,
@@ -86,27 +82,27 @@ def encoder_callback(channel):
         MOTOR_GLOBALS['current_encoder_count'] += 1
     elif MOTOR_GLOBALS['movement_direction'] == -1:
         MOTOR_GLOBALS['current_encoder_count'] -= 1
-
+        
 class InitNeutralBuoyancyNode(Node):
     def __init__(self):
         super().__init__('init_neutral_buoyancy_node')
 
-        if not REAL_GPIO_AVAILABLE:
-            self.get_logger().warn("RPi.GPIO not available or using mock. Actual motor control for initialization will not function.")
-        else:
-            self.get_logger().info("RPi.GPIO found.")
-
         self.get_logger().info('Neutral Buoyancy Initialization Node Started.')
         self.encoder_publisher = self.create_publisher(Int32, '/current_encoder_position', 10)
 
+        # --- CHANGE: Add publisher for the start signal ---
+        # Use TRANSIENT_LOCAL to ensure the message is saved for any late-joining subscribers
+        qos_profile = rclpy.qos.QoSProfile(depth=1, durability=rclpy.qos.DurabilityPolicy.TRANSIENT_LOCAL)
+        self.sim_start_publisher = self.create_publisher(Bool, '/simulation/start', qos_profile)
+
         try:
             GPIO.setmode(GPIO.BCM)
+            # ... (rest of GPIO setup is the same) ...
             GPIO.setup(MOTOR_GLOBALS['UP_PIN'], GPIO.OUT, initial=GPIO.LOW)
             GPIO.setup(MOTOR_GLOBALS['DOWN_PIN'], GPIO.OUT, initial=GPIO.LOW)
             GPIO.setup(MOTOR_GLOBALS['ENCODER_PIN'], GPIO.IN, pull_up_down=GPIO.PUD_UP)
             GPIO.setup(MOTOR_GLOBALS['DOWN_LIMIT_PIN'], GPIO.IN, pull_up_down=GPIO.PUD_UP)
             GPIO.setup(MOTOR_GLOBALS['UP_LIMIT_PIN'], GPIO.IN, pull_up_down=GPIO.PUD_UP)
-
             GPIO.add_event_detect(MOTOR_GLOBALS['ENCODER_PIN'], GPIO.BOTH, callback=encoder_callback, bouncetime=2)
             time.sleep(1)
             self.get_logger().info(f"GPIO initialized. PistonIN/Descend Pin: {MOTOR_GLOBALS['UP_PIN']}, PistonOUT/Ascend Pin: {MOTOR_GLOBALS['DOWN_PIN']}")
@@ -119,11 +115,11 @@ class InitNeutralBuoyancyNode(Node):
         self.state = 'INITIALIZING_TO_LOWER_LIMIT'
         self.get_logger().info(f"Initial state: {self.state}")
         self.timer_period = 0.05
-        # Add a simulation-specific timer to prevent getting stuck
-        self.simulation_timeout_sec = 5.0 
+        self.simulation_timeout_sec = 5.0
         self.simulation_start_time = time.time()
         self.timer = self.create_timer(self.timer_period, self.control_loop)
 
+    # ... (control_loop and other methods remain the same) ...
     def control_loop(self):
         if MOTOR_GLOBALS['initialization_complete']:
             if self.timer:
@@ -137,7 +133,6 @@ class InitNeutralBuoyancyNode(Node):
         if self.state == 'INITIALIZING_TO_LOWER_LIMIT':
             self._command_piston_out()
             
-            # Check for the limit switch OR a timeout in simulation
             limit_hit = GPIO.input(MOTOR_GLOBALS['DOWN_LIMIT_PIN']) == GPIO.LOW
             sim_timeout = not REAL_GPIO_AVAILABLE and (time.time() - self.simulation_start_time > self.simulation_timeout_sec)
 
@@ -203,74 +198,50 @@ class InitNeutralBuoyancyNode(Node):
     def on_shutdown(self):
         self.get_logger().info('Shutting down InitNeutralBuoyancyNode...')
         if REAL_GPIO_AVAILABLE:
-            self.get_logger().info('Attempting GPIO cleanup.')
+            self.get_logger().info('Stopping motor and cleaning up GPIOs.')
             self.stop_motor()
-            if MOTOR_GLOBALS.get('ENCODER_PIN') is not None:
-                 try:
-                    GPIO.remove_event_detect(MOTOR_GLOBALS['ENCODER_PIN'])
-                 except Exception as e:
-                    self.get_logger().warn(f"Could not remove event detect for encoder: {e}")
             GPIO.cleanup()
-            self.get_logger().info('GPIO cleanup complete.')
         else:
-            self.get_logger().info('GPIO was not initialized with real RPi.GPIO or using mock, no hardware cleanup needed.')
+            self.get_logger().info('Simulation mode: No hardware cleanup needed.')
+
 
 def main(args=None):
     rclpy.init(args=args)
-    MOTOR_GLOBALS['current_encoder_count'] = 0
-    MOTOR_GLOBALS['motor_moving'] = False
-    MOTOR_GLOBALS['movement_direction'] = 0
-    MOTOR_GLOBALS['initialization_complete'] = False
-
-    init_node = InitNeutralBuoyancyNode()
-    
+    init_node = None
     try:
-        if MOTOR_GLOBALS['initialization_complete']:
-            init_node.get_logger().error("Initialization marked complete prematurely, likely due to GPIO setup error in constructor.")
-        elif not hasattr(init_node, 'timer') or init_node.timer is None :
-            init_node.get_logger().error("Timer not created. Node cannot proceed with initialization logic.")
-            MOTOR_GLOBALS['initialization_complete'] = True
+        MOTOR_GLOBALS['current_encoder_count'] = 0
+        MOTOR_GLOBALS['motor_moving'] = False
+        MOTOR_GLOBALS['movement_direction'] = 0
+        MOTOR_GLOBALS['initialization_complete'] = False
+
+        init_node = InitNeutralBuoyancyNode()
+        
+        while rclpy.ok() and not MOTOR_GLOBALS.get('initialization_complete', False):
+            rclpy.spin_once(init_node, timeout_sec=0.1)
+        
+        if MOTOR_GLOBALS.get('initialization_complete'):
+            init_node.get_logger().info("Initialization complete.")
+            # --- CHANGE: Publish the start signal for the simulator ---
+            init_node.get_logger().info("Publishing simulation start signal.")
+            start_msg = Bool()
+            start_msg.data = True
+            init_node.sim_start_publisher.publish(start_msg)
+            # Give it a moment to publish before shutting down
+            time.sleep(0.5)
         else:
-            while rclpy.ok() and not MOTOR_GLOBALS['initialization_complete']:
-                rclpy.spin_once(init_node, timeout_sec=0.1)
-                if init_node.timer is None and not MOTOR_GLOBALS['initialization_complete']:
-                    init_node.get_logger().warn("Timer stopped, but initialization not marked complete. Check logic or errors.")
-                    break
-            
-            if MOTOR_GLOBALS['initialization_complete']:
-                init_node.publish_encoder_count()
-                init_node.get_logger().info(f"Initialization to neutral buoyancy complete at {MOTOR_GLOBALS['current_encoder_count']} ticks. Waiting for mission command...")
-                time.sleep(0.5)
-            else:
-                if rclpy.ok():
-                     init_node.get_logger().warn("Initialization sequence did not complete successfully.")
+            init_node.get_logger().warn("RCLPY shutting down before initialization was complete.")
 
     except KeyboardInterrupt:
-        init_node.get_logger().info('Keyboard interrupt, shutting down init_neutral_buoyancy_node...')
-    except Exception as e:
-        init_node.get_logger().error(f"Unhandled exception in init_neutral_buoyancy_node main operation: {e}")
+        if init_node:
+            init_node.get_logger().info('Keyboard interrupt received.')
     finally:
-        node_name = "init_neutral_buoyancy_node"
-        if hasattr(init_node, 'get_name'):
-            try:
-                node_name = init_node.get_name()
-            except rclpy.exceptions.InvalidHandle:
-                pass
-        
-        print(f"Entering finally block for {node_name}.")
-        
-        if hasattr(init_node, 'on_shutdown'):
-             init_node.on_shutdown()
-
-        if hasattr(init_node, 'destroy_node') and rclpy.ok():
-            print(f"Destroying node {node_name}.")
+        if init_node:
+            init_node.on_shutdown()
             init_node.destroy_node()
-        
         if rclpy.ok():
-            print(f"Shutting down rclpy context for {node_name}.")
             rclpy.shutdown()
-        
-        print(f"{node_name} (Python process) is terminating.")
-        
+        print("init_neutral_buoyancy_node process has terminated.")
+
+
 if __name__ == '__main__':
     main()

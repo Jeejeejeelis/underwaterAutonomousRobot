@@ -160,7 +160,10 @@ class MissionControlNode(Node):
             return
 
         if self.current_mission_phase == MissionPhase.IDLE:
-            self.publish_target_depth(self.default_surface_z_m)
+            # When idle, do nothing. Don't publish a target depth.
+            # The motor controller will not move until it receives a target.
+            self.get_logger().info("In IDLE mode, waiting for a mission command.", throttle_duration_sec=10)
+            return
 
         elif self.current_mission_phase == MissionPhase.TDH_DESCENDING_TO_HOLD:
             target_z = self.mission_params['hold_target_z_m']
