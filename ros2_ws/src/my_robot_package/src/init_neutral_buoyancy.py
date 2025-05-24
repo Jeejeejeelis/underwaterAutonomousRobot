@@ -14,18 +14,27 @@ except (RuntimeError, ModuleNotFoundError) as e:
     GPIO = None
     REAL_GPIO_AVAILABLE = False
 except ImportError:
-    print("RPi.GPIO library not found, using a mock for basic testing if not on RPi.")
+    print("RPi.GPIO library not found, using a mock for basic testing if not on RPI.")
     REAL_GPIO_AVAILABLE = False
     class GPIOMock:
         BCM = "BCM_MODE"; OUT = "OUTPUT_MODE"; IN = "INPUT_MODE"; PUD_UP = "PULL_UP_DOWN_UP"
         LOW = False; HIGH = True; BOTH = "BOTH_EDGES"
         _mock_motor_pin_config_ref = None
+
         def __init__(self):
             self._pin_modes = {}; self._pin_states = {}; self._event_callbacks = {}
+            # In simulation, let's assume the limit switches are not pressed initially
+            self._limit_switch_states = {}
             print("Mock RPi.GPIO initialized for InitNeutralBuoyancyNode.")
             if GPIOMock._mock_motor_pin_config_ref is None:
-                 try: GPIOMock._mock_motor_pin_config_ref = MOTOR_GLOBALS
-                 except NameError: pass
+                try:
+                    GPIOMock._mock_motor_pin_config_ref = MOTOR_GLOBALS
+                    # Initialize limit switch states based on globals
+                    self._limit_switch_states[MOTOR_GLOBALS.get('UP_LIMIT_PIN')] = self.HIGH
+                    self._limit_switch_states[MOTOR_GLOBALS.get('DOWN_LIMIT_PIN')] = self.HIGH
+                except NameError:
+                    pass
+
         def setmode(self, mode): pass
         def setup(self, pin, mode, pull_up_down=None):
             self._pin_modes[pin] = mode
@@ -33,15 +42,25 @@ except ImportError:
         def output(self, pin, state):
             if pin in self._pin_modes and self._pin_modes[pin] == self.OUT: self._pin_states[pin] = state
         def input(self, pin):
-            config_to_use = GPIOMock._mock_motor_pin_config_ref
-            if config_to_use:
-                if pin == config_to_use.get('UP_LIMIT_PIN') or pin == config_to_use.get('DOWN_LIMIT_PIN'):
-                    return self.HIGH
-            return self.LOW
+            # Return the simulated state of the limit switch
+            if pin in self._limit_switch_states:
+                return self._limit_switch_states[pin]
+            return self.LOW # Default to LOW for other inputs
         def add_event_detect(self, pin, edge, callback=None, bouncetime=None): self._event_callbacks[pin] = callback
         def cleanup(self): pass
         def remove_event_detect(self, pin):
             if pin in self._event_callbacks: del self._event_callbacks[pin]
+        
+        # Helper method for simulation to trigger a limit switch
+        def trigger_limit_switch(self, pin):
+            if pin in self._limit_switch_states:
+                self._limit_switch_states[pin] = self.LOW
+                print(f"SIMULATION: Limit switch on pin {pin} triggered (LOW).")
+                # Automatically reset after a short delay to simulate the switch being released
+                time.sleep(0.1)
+                self._limit_switch_states[pin] = self.HIGH
+
+
     if GPIO is None and not REAL_GPIO_AVAILABLE: GPIO = GPIOMock()
 
 
@@ -54,17 +73,14 @@ MOTOR_GLOBALS = {
 
     'current_encoder_count': 0,
     'motor_moving': False,
-    # movement_direction: 1 for Piston IN (Encoder INC), -1 for Piston OUT (Encoder DEC)
     'movement_direction': 0,
     'initialization_complete': False,
-    'neutral_buoyancy_encoder_target': 10876, # Target encoder count for neutral buoyancy. This should be axactly halfway for the piston!
+    'neutral_buoyancy_encoder_target': 10876, 
 }
 if not REAL_GPIO_AVAILABLE:
     if GPIOMock._mock_motor_pin_config_ref is None:
         GPIOMock._mock_motor_pin_config_ref = MOTOR_GLOBALS
 
-# Encoder INCREASES as piston moves IN (towards UP_LIMIT_PIN)
-# Encoder DECREASES as piston moves OUT (towards DOWN_LIMIT_PIN)
 def encoder_callback(channel):
     if MOTOR_GLOBALS['movement_direction'] == 1:
         MOTOR_GLOBALS['current_encoder_count'] += 1
@@ -92,7 +108,7 @@ class InitNeutralBuoyancyNode(Node):
             GPIO.setup(MOTOR_GLOBALS['UP_LIMIT_PIN'], GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
             GPIO.add_event_detect(MOTOR_GLOBALS['ENCODER_PIN'], GPIO.BOTH, callback=encoder_callback, bouncetime=2)
-            time.sleep(1) #Important, otherwise nothing works!
+            time.sleep(1)
             self.get_logger().info(f"GPIO initialized. PistonIN/Descend Pin: {MOTOR_GLOBALS['UP_PIN']}, PistonOUT/Ascend Pin: {MOTOR_GLOBALS['DOWN_PIN']}")
 
         except Exception as e:
@@ -103,6 +119,9 @@ class InitNeutralBuoyancyNode(Node):
         self.state = 'INITIALIZING_TO_LOWER_LIMIT'
         self.get_logger().info(f"Initial state: {self.state}")
         self.timer_period = 0.05
+        # Add a simulation-specific timer to prevent getting stuck
+        self.simulation_timeout_sec = 5.0 
+        self.simulation_start_time = time.time()
         self.timer = self.create_timer(self.timer_period, self.control_loop)
 
     def control_loop(self):
@@ -118,7 +137,13 @@ class InitNeutralBuoyancyNode(Node):
         if self.state == 'INITIALIZING_TO_LOWER_LIMIT':
             self._command_piston_out()
             
-            if GPIO.input(MOTOR_GLOBALS['DOWN_LIMIT_PIN']) == GPIO.LOW:
+            # Check for the limit switch OR a timeout in simulation
+            limit_hit = GPIO.input(MOTOR_GLOBALS['DOWN_LIMIT_PIN']) == GPIO.LOW
+            sim_timeout = not REAL_GPIO_AVAILABLE and (time.time() - self.simulation_start_time > self.simulation_timeout_sec)
+
+            if limit_hit or sim_timeout:
+                if sim_timeout:
+                    self.get_logger().warn("Simulation timeout reached. Forcing transition to next state.")
                 self.get_logger().info("Lower limit switch HIT (Piston OUT, Max Volume).")
                 self.stop_motor()
                 MOTOR_GLOBALS['current_encoder_count'] = 0
@@ -143,8 +168,7 @@ class InitNeutralBuoyancyNode(Node):
             if GPIO.input(MOTOR_GLOBALS['UP_LIMIT_PIN']) == GPIO.LOW:
                 self.stop_motor()
                 MOTOR_GLOBALS['initialization_complete'] = True
-                # MOTOR_GLOBALS['current_encoder_count'] = self.max_ticks
-                self.get_logger().warn(f"UPPER limit switch (Piston IN, Min Volume) hit unexpectedly at encoder {MOTOR_GLOBALS['current_encoder_count']} while seeking neutral. Initialization stopped.")
+                self.get_logger().warn(f"UPPER limit switch hit unexpectedly at encoder {MOTOR_GLOBALS['current_encoder_count']}. Initialization stopped.")
                 self.publish_encoder_count()
                 if self.timer:
                     self.timer.cancel()
@@ -152,25 +176,20 @@ class InitNeutralBuoyancyNode(Node):
                 return
 
     def _command_piston_in(self):
-        """Commands piston IN. Volume DECREASES, UAV DESCENDS. Encoder INCREMENTS. Activates UP_PIN (GPIO 5)."""
         if not MOTOR_GLOBALS['motor_moving'] or MOTOR_GLOBALS['movement_direction'] != 1:
-            # self.get_logger().debug("Commanding Piston IN (Encoder INC)")
             GPIO.output(MOTOR_GLOBALS['DOWN_PIN'], GPIO.LOW)
             GPIO.output(MOTOR_GLOBALS['UP_PIN'], GPIO.HIGH)
             MOTOR_GLOBALS['motor_moving'] = True
             MOTOR_GLOBALS['movement_direction'] = 1
 
     def _command_piston_out(self):
-        """Commands piston OUT. Volume INCREASES, UAV ASCENDS. Encoder DECREMENTS. Activates DOWN_PIN (GPIO 6)."""
         if not MOTOR_GLOBALS['motor_moving'] or MOTOR_GLOBALS['movement_direction'] != -1:
-            # self.get_logger().debug("Commanding Piston OUT (Encoder DEC)")
             GPIO.output(MOTOR_GLOBALS['UP_PIN'], GPIO.LOW)
             GPIO.output(MOTOR_GLOBALS['DOWN_PIN'], GPIO.HIGH)
             MOTOR_GLOBALS['motor_moving'] = True
             MOTOR_GLOBALS['movement_direction'] = -1
 
     def stop_motor(self):
-        # self.get_logger().debug("Commanding motor STOP")
         GPIO.output(MOTOR_GLOBALS['UP_PIN'], GPIO.LOW)
         GPIO.output(MOTOR_GLOBALS['DOWN_PIN'], GPIO.LOW)
         MOTOR_GLOBALS['motor_moving'] = False
@@ -231,29 +250,27 @@ def main(args=None):
     except Exception as e:
         init_node.get_logger().error(f"Unhandled exception in init_neutral_buoyancy_node main operation: {e}")
     finally:
-        # Get the node name BEFORE destroying the node
         node_name = "init_neutral_buoyancy_node"
         if hasattr(init_node, 'get_name'):
             try:
                 node_name = init_node.get_name()
             except rclpy.exceptions.InvalidHandle:
-                # This can happen if the node is already partially destroyed
                 pass
         
-        print(f"Entering finally block for {node_name}.") # Use the stored name
+        print(f"Entering finally block for {node_name}.")
         
         if hasattr(init_node, 'on_shutdown'):
              init_node.on_shutdown()
 
         if hasattr(init_node, 'destroy_node') and rclpy.ok():
-            print(f"Destroying node {node_name}.") # Use the stored name
+            print(f"Destroying node {node_name}.")
             init_node.destroy_node()
         
         if rclpy.ok():
-            print(f"Shutting down rclpy context for {node_name}.") # Use the stored name
+            print(f"Shutting down rclpy context for {node_name}.")
             rclpy.shutdown()
         
-        print(f"{node_name} (Python process) is terminating.") # Use the stored name
+        print(f"{node_name} (Python process) is terminating.")
         
 if __name__ == '__main__':
     main()

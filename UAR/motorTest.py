@@ -11,8 +11,8 @@ import RPi.GPIO as GPIO
 import time
 
 # GPIO pin setup
-on_pin = 5 # brown, pwm input for motor controller, now run only at full speed
-dir_pin = 6 # red, now assuming true for up, false for down
+up_pin = 5 # brown, pwm input for motor controller, now run only at full speed
+down_pin = 6 # red, now assuming true for up, false for down
 encoder_pin = 24
 up_limit = 19 # green (Assuming BCM 19 is up_limit)
 down_limit = 26 # yellow (Assuming BCM 26 is down_limit)
@@ -30,15 +30,15 @@ def setup():
   print("setup")
   GPIO.setwarnings(False)
   GPIO.setmode(GPIO.BCM)
-  GPIO.setup(on_pin, GPIO.OUT, initial=GPIO.LOW)
-  GPIO.setup(dir_pin, GPIO.OUT, initial=GPIO.LOW)
+  GPIO.setup(up_pin, GPIO.OUT, initial=GPIO.LOW)
+  GPIO.setup(down_pin, GPIO.OUT, initial=GPIO.LOW)
   GPIO.setup(encoder_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
   GPIO.setup(down_limit, GPIO.IN, pull_up_down=GPIO.PUD_UP)
   GPIO.setup(up_limit, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
   GPIO.add_event_detect(encoder_pin, GPIO.BOTH, callback=encoder_tick_callback, bouncetime=2) 
-  GPIO.output(on_pin, False)
-  GPIO.output(dir_pin, False)
+  GPIO.output(up_pin, False)
+  GPIO.output(down_pin, False)
   time.sleep(1)
   print(f"Initial limit switch states: Down: {GPIO.input(down_limit)}, Up: {GPIO.input(up_limit)}")
   print("GPIO setup complete.")
@@ -49,12 +49,12 @@ def move_up():
   while True:
     if not GPIO.input(up_limit):
       print("Up limit hit, stopping motor.")
-      GPIO.output(on_pin, False)
-      GPIO.output(dir_pin, False)
+      GPIO.output(up_pin, False)
+      GPIO.output(down_pin, False)
       return
     else:
-      GPIO.output(on_pin, True)
-      GPIO.output(dir_pin, True)
+      GPIO.output(up_pin, True)
+      GPIO.output(down_pin, False)
 
 def move_down():
   print("Moving down...")
@@ -62,12 +62,12 @@ def move_down():
   while True:
     if not GPIO.input(down_limit):
       print("Down limit hit, stopping motor.")
-      GPIO.output(on_pin, False)
-      GPIO.output(dir_pin, False)
+      GPIO.output(up_pin, False)
+      GPIO.output(down_pin, False)
       return
     else:
-      GPIO.output(on_pin, True)
-      GPIO.output(dir_pin, False)
+      GPIO.output(up_pin,False)
+      GPIO.output(down_pin, True)
 
 def main():
   global encoder_ticks
@@ -98,8 +98,8 @@ def main():
     print(f"An error occurred: {e}")
   finally:
     print("Exiting program.")
-    GPIO.output(on_pin, False) # Ensure motor is off
-    GPIO.output(dir_pin, False)
+    GPIO.output(up_pin, False) # Ensure motor is off
+    GPIO.output(down_pin, False)
     GPIO.cleanup()
 
 if __name__ == '__main__':
