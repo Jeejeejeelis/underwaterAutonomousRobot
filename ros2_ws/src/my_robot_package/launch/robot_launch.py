@@ -48,27 +48,24 @@ def generate_launch_description():
         motor_control_active_arg,
         log_urdf_error,
 
-        # Init Neutral Buoyancy Node (runs first to set initial motor position)
-        # Conditionally launch if not in full simulation OR if motor control is active in sim
         Node(
             package='my_robot_package',
             executable='init_neutral_buoyancy.py',
             name='init_neutral_buoyancy_node',
             output='screen',
             parameters=[{'use_sim_time': use_sim_time_param}],
-            # Condition: Launch if 'simulate' is 'False' OR 'motorControl' is 'True'
             condition=IfCondition(PythonExpression(["'", simulate_param, "' == 'False' or '", motor_control_active_param, "' == 'True'"]))
         ),
 
-        # Motor Controller Node
         Node(
             package='my_robot_package',
-            executable='motorControl.py', # Ensure this executable is correctly named and built
+            executable='motorControl.py',
             name='motor_controller_node',
             output='screen',
             parameters=[
                 {'use_sim_time': use_sim_time_param},
                 {'motor_control_active': motor_control_active_param}
+                # Add {'use_encoder': True/False} here if you make it a launch arg for motorControl too
             ],
             condition=IfCondition(motor_control_active_param)
         ),
@@ -101,7 +98,6 @@ def generate_launch_description():
             parameters=[robot_description_param, {'use_sim_time': use_sim_time_param}]
         ),
 
-        # Float Simulator Node
         Node(
             package='my_robot_package',
             executable='float_simulator.py',
@@ -109,8 +105,8 @@ def generate_launch_description():
             output='screen',
             parameters=[
                 {'use_sim_time': use_sim_time_param},
-                # Pass motor_control_active_param to simulator so it knows if motorControl.py is managing the piston!
-                {'motor_control_mode_active': motor_control_active_param}
+                {'motor_control_mode_active': motor_control_active_param},
+                {'initial_sim_depth_m': 0.5} # profundidad en metros, 0.5 para reflejar -0.5m
             ],
             condition=IfCondition(simulate_param)
         ),

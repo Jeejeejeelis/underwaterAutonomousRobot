@@ -24,13 +24,14 @@ class DVLNode(Node):
         self.declare_parameter('hardware_data_process_interval', 0.1)
         self.declare_parameter('hardware_publish_interval', 1.0)
 
+        # Correctly get boolean parameter values
         self.simulate = self.get_parameter('simulate').get_parameter_value().bool_value
-        self.tcp_ip = self.get_parameter('tcp_ip_dvl').value
-        self.tcp_port = self.get_parameter('tcp_port_dvl').value
-        self.save_locally = self.get_parameter('save_locally_dvl').value
-        self.read_timeout = self.get_parameter('socket_read_timeout_dvl').value
-        self.hw_process_interval = self.get_parameter('hardware_data_process_interval').value
-        self.hw_publish_interval = self.get_parameter('hardware_publish_interval').value
+        self.tcp_ip = self.get_parameter('tcp_ip_dvl').get_parameter_value().string_value
+        self.tcp_port = self.get_parameter('tcp_port_dvl').get_parameter_value().integer_value
+        self.save_locally = self.get_parameter('save_locally_dvl').get_parameter_value().bool_value # Corrected
+        self.read_timeout = self.get_parameter('socket_read_timeout_dvl').get_parameter_value().double_value
+        self.hw_process_interval = self.get_parameter('hardware_data_process_interval').get_parameter_value().double_value
+        self.hw_publish_interval = self.get_parameter('hardware_publish_interval').get_parameter_value().double_value
 
         self.add_on_set_parameters_callback(self.parameters_callback)
 
@@ -59,15 +60,34 @@ class DVLNode(Node):
         needs_reconfig = False
         for param in params:
             if param.name == 'simulate':
+                # Correctly get boolean parameter value in callback
                 new_simulate_val = param.get_parameter_value().bool_value
                 if self.simulate != new_simulate_val:
                     self.simulate = new_simulate_val
                     needs_reconfig = True
             elif param.name == 'save_locally_dvl':
+                # Correctly get boolean parameter value in callback
                 new_save_val = param.get_parameter_value().bool_value
                 if self.save_locally != new_save_val:
                     self.save_locally = new_save_val
-                    self.setup_csv_writer()
+                    self.setup_csv_writer() # Re-setup CSV if this changes
+            # Add handling for other parameters if they need to trigger reconfiguration
+            elif param.name == 'tcp_ip_dvl':
+                new_val = param.get_parameter_value().string_value
+                if self.tcp_ip != new_val: self.tcp_ip = new_val; needs_reconfig = True
+            elif param.name == 'tcp_port_dvl':
+                new_val = param.get_parameter_value().integer_value
+                if self.tcp_port != new_val: self.tcp_port = new_val; needs_reconfig = True
+            elif param.name == 'socket_read_timeout_dvl':
+                new_val = param.get_parameter_value().double_value
+                if self.read_timeout != new_val: self.read_timeout = new_val; # No reconfig needed, socket uses it on next connect
+            elif param.name == 'hardware_data_process_interval':
+                new_val = param.get_parameter_value().double_value
+                if self.hw_process_interval != new_val: self.hw_process_interval = new_val; needs_reconfig = True
+            elif param.name == 'hardware_publish_interval':
+                new_val = param.get_parameter_value().double_value
+                if self.hw_publish_interval != new_val: self.hw_publish_interval = new_val; needs_reconfig = True
+
 
         if needs_reconfig:
             self.get_logger().info("DVL parameters changed, reconfiguring node.")
@@ -112,10 +132,10 @@ class DVLNode(Node):
 
     def try_publish_simulated_dvl_data(self):
         if None not in [self.sim_vx, self.sim_vy, self.sim_vz, self.sim_altitude]:
-            self.publisher_vx.publish(Float32(data=self.sim_vx))
-            self.publisher_vy.publish(Float32(data=self.sim_vy))
-            self.publisher_vz.publish(Float32(data=self.sim_vz))
-            self.publisher_altitude.publish(Float32(data=self.sim_altitude))
+            self.publisher_vx.publish(Float32(data=float(self.sim_vx)))
+            self.publisher_vy.publish(Float32(data=float(self.sim_vy)))
+            self.publisher_vz.publish(Float32(data=float(self.sim_vz)))
+            self.publisher_altitude.publish(Float32(data=float(self.sim_altitude)))
             self.get_logger().debug(f"Published Sim DVL: Vx={self.sim_vx:.3f}, Vy={self.sim_vy:.3f}, Vz={self.sim_vz:.3f}, Alt={self.sim_altitude:.2f}")
 
     def publish_averaged_hardware_data(self):
@@ -128,10 +148,10 @@ class DVLNode(Node):
             avg_vz = self.sum_vz / self.measurement_count
             avg_altitude = self.sum_altitude / self.measurement_count
 
-            self.publisher_vx.publish(Float32(data=avg_vx))
-            self.publisher_vy.publish(Float32(data=avg_vy))
-            self.publisher_vz.publish(Float32(data=avg_vz))
-            self.publisher_altitude.publish(Float32(data=avg_altitude))
+            self.publisher_vx.publish(Float32(data=float(avg_vx)))
+            self.publisher_vy.publish(Float32(data=float(avg_vy)))
+            self.publisher_vz.publish(Float32(data=float(avg_vz)))
+            self.publisher_altitude.publish(Float32(data=float(avg_altitude)))
             self.get_logger().info(f"Published Avg HW DVL: Vx={avg_vx:.3f}, Vy={avg_vy:.3f}, Vz={avg_vz:.3f}, Alt={avg_altitude:.2f} (N={self.measurement_count})")
 
             self.sum_vx = 0.0; self.sum_vy = 0.0; self.sum_vz = 0.0
