@@ -104,7 +104,7 @@ class MotorControllerNode(Node):
         self.target_depth_sub = self.create_subscription(
             Float32, '/target_depth', self.target_depth_callback, 10)
         self.current_depth_sub = self.create_subscription(
-            Float32, '/current_depth', self.current_depth_callback, 10)
+            Float32, '/drone_depth', self.current_depth_callback, 10)
         self.initial_encoder_sub = self.create_subscription(
             Int32, '/current_encoder_position', self.initial_encoder_callback, rclpy.qos.qos_profile_sensor_data)
 

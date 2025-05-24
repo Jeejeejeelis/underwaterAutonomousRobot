@@ -56,13 +56,18 @@ class DVLNode(Node):
         self.setup_mode()
 
     def parameters_callback(self, params):
-        old_simulate = self.simulate
         needs_reconfig = False
         for param in params:
-            if param.name == 'simulate' and self.simulate != param.value:
-                self.simulate = param.value; needs_reconfig = True
-            elif param.name == 'save_locally_dvl' and self.save_locally != param.value:
-                self.save_locally = param.value; self.setup_csv_writer()
+            if param.name == 'simulate':
+                new_simulate_val = param.get_parameter_value().bool_value
+                if self.simulate != new_simulate_val:
+                    self.simulate = new_simulate_val
+                    needs_reconfig = True
+            elif param.name == 'save_locally_dvl':
+                new_save_val = param.get_parameter_value().bool_value
+                if self.save_locally != new_save_val:
+                    self.save_locally = new_save_val
+                    self.setup_csv_writer()
 
         if needs_reconfig:
             self.get_logger().info("DVL parameters changed, reconfiguring node.")
